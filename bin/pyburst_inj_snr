@@ -15,6 +15,7 @@ from glue.ligolw import lsctables, table, utils
 from pylal import antenna
 from pylal import coherent_inspiral_metric as metric
 from pylal import coherent_inspiral_metric_detector_details as details
+from pylal.series import read_psd_xmldoc
 
 import lal
 import lalburst
@@ -71,7 +72,13 @@ def parse_psd_file( filestr ):
 	"""
 	Map the user-provided PSD file string into a function to be called as PSD(f).
 	"""
-	f, psd = numpy.loadtxt( filestr, unpack=True )
+	try:
+		xmldoc = utils.load_filename(filestr)
+		psd = read_psd_xmldoc(xmldoc).values()[0]
+		f = numpy.arange(0, len(psd.data)*psd.deltaF, psd.deltaF)
+		psd = psd.data
+	except:
+		f, psd = numpy.loadtxt( filestr, unpack=True )
 	def anon_interp( fvals ):
 		return numpy.interp( fvals, f, psd )
 	return anon_interp
