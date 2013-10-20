@@ -10,7 +10,9 @@ import itertools
 import numpy
 import scipy.optimize
 
-from glue.ligolw import lsctables, table, utils
+from glue.ligolw import lsctables, table, utils, ligolw, ilwd
+from glue import lal as gluelal
+from glue.ligolw.utils import process
 
 from pylal import antenna
 from pylal import coherent_inspiral_metric as metric
@@ -92,6 +94,29 @@ def parse_psd_func( funcstr ):
 	except AttributeError:
 		raise AttributeError( "Could not find PSD function %s in lalsimulation" % funcstr )
 
+def sim_to_sngl_table(sim_type, table_type):
+	column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
+	return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns"])
+
+def sim_to_sngl_insp(sim, ifo, sngl_table):
+	if "SimInspiral" in str(sim): # Don't ask
+		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
+	else:
+		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
+	sngl_row = sngl_table.RowType()
+	for col in column_over:
+		setattr(sngl_row, col, getattr(sim, col))
+
+	sngl_row.set_end( gluelal.LIGOTimeGPS(
+    		int(getattr(sim, "%s_end_time" % ifo[0].lower())),
+    		getattr(sim, "%s_end_time_ns" % ifo[0].lower()) ) )
+	sngl_row.ifo = ifo
+	sngl_row.search = "fake"
+	sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
+	sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
+	sngl_table.append(sngl_row)
+	return sngl_row
+
 #
 # Efficiency calcualtion routines
 #
@@ -144,7 +169,7 @@ optp.add_option("--eff-rank", default="netSNR", help="How to rank injections for
 optp.add_option("--single-snr-cut-thresh", type=float, help="Cut any injection with a single detector SNR less than this.")
 optp.add_option("--coherent-snr-cut-thresh", type=float, help="Cut any injection with a coherent SNR less than this.")
 optp.add_option("--coherent-amplitude-cut-thresh", type=float, help="Cut any injection with a cWB coherent ampltiude (eta) less than this.")
-
+optp.add_option("--store-sngl", help="Store the values of the simulated event and SNR calculation in an sngl_* event row. Valid choices are sngl_inspiral.")
 optp.add_option("--squeeze-attribute", default="hrss", help="Squeeze this attribute for injections so as to make the more detectable. Default is 'hrss'. You might try 'distance' for SimInspirals.")
 
 opts, args = optp.parse_args()
@@ -222,7 +247,14 @@ injection_waveforms = {}
 # Store sims to cut
 cut_sims = []
 
+# Store realized SNRs in SnglInspiral rows
+if opts.store_sngl == "sngl_inspiral":
+	sngl_table = sim_to_sngl_table(lsctables.SimInspiralTable, lsctables.SnglInspiralTable)
+
+i = 0
 for row in sims:
+	if i >= 3: break
+	i += 1
 	snr = {}
 	for d, det in detectors.iteritems():
 		psd = detector_psds[d]
@@ -274,6 +306,10 @@ for row in sims:
 		power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
 		snr[d] = numpy.sqrt(power)
 		print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
+		if opts.store_sngl == "sngl_inspiral":
+			sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
+		sngl_row.snr = snr[d]
+		sngl_row.event_id = sngl_table.get_next_id()
 
 	net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
 	print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
@@ -362,6 +398,14 @@ try:
 			del sim_insp[n-i]
 except ValueError:
 	pass
+
+if opts.store_sngl == "sngl_inspiral":
+	xmldoc = ligolw.Document()
+	xmldoc.childNodes.append(ligolw.LIGO_LW())
+	xmldoc.childNodes[0].appendChild(sngl_table)
+	process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
+	ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
+	utils.write_filename(xmldoc, "%s-FAKE_SEARCH.xml.gz" % ifos, gz=True)
 
 if len(cut_sims) > 0:
 	print "Writing cut XML file."
