@@ -382,10 +382,10 @@ for src in srcs:
 			row.frequency = f[i]
 			if options.sg_polarization_type == "linear":
 				row.pol_ellipse_e = 1.0
-				row.pol_ellipse_angle = numpy.pi/2
+				row.pol_ellipse_angle = 0
 			elif options.sg_polarization_type == "circular":
 				row.pol_ellipse_e = 0.0
-				row.pol_ellipse_angle = numpy.pi/2
+				row.pol_ellipse_angle = 0
 			elif options.sg_polarization_type == "elliptical":
 				row.pol_ellipse_e = uniform_interval((0,1),1)[0]
 				row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
