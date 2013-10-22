@@ -80,19 +80,18 @@ def measure_hrss( row, rate ):
 		except AttributeError: continue # we didn't define it
 		except TypeError: continue # the structure is different than the TableRow
 	hp, hx = lalburst.GenerateSimBurst( swig_row, 1/16384.0 )
-	hp0, hx0 = lalburst.GenerateSimBurst( swig_row, 1/16384.0 )
 	hp0.data.data *= 0
 	hx0.data.data *= 0
 	# FIXME: This can't be right...
 	# H+ hrss only
-	hphp = lalsimulation.MeasureHrss( hp, hx0 )
+	hphp = lalsimulation.MeasureHrss( hp, hx0 )**2
 	# Hx hrss only
-	hxhx = lalsimulation.MeasureHrss( hp0, hx )
+	hxhx = lalsimulation.MeasureHrss( hp0, hx )**2
 	# sqrt(|Hx|^2 + |Hx|^2)
 	hrss = lalsimulation.MeasureHrss( hp, hx )
 	hp.data.data += hx.data.data
 	# |H+Hx|
-	hphx = lalsimulation.MeasureHrss( hp, hx0 ) - hrss
+	hphx = numpy.sqrt(lalsimulation.MeasureHrss( hp, hx0 )**2 - hrss**2)*numpy.sqrt(2)
 	return  hrss, hphp, hxhx, hphx
 
 def uniform_dec(num):
