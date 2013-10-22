@@ -234,7 +234,7 @@ parser.add_option_group(sg_section)
 
 wnb_section = OptionGroup(parser, "Band and time limited white noise burst (BTLWNB) options", "This group controls the distribution of BTLWNB injections.")
 general_section.add_option("--wnb-max-dist", metavar = "Mpc", default = 1.0, type = "float", help = "Maximum distance for which to produce WNB in Mpc, default is 1.")
-wnb_section.add_option("--wnb-fix-egw", metavar = "M_s", type = "float", action="append", help = "Fix the energy (in solar masses with c=1) value of the BTLWNB injections. Give several times with different values to build up an array of bandwidths to choose from. Overrides min and max options.")
+wnb_section.add_option("--wnb-fix-egw", metavar = "M_s", type = "float", action="append", help = "Fix the energy (in solar masses with c=1) value of the BTLWNB injections. Give several times with different values to build up an array of energies to choose from. Overrides min and max options.")
 wnb_section.add_option("--wnb-min-egw", metavar = "M_s", type = "float", help = "Fix the min energy value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-max-egw", metavar = "M_s", type = "float", help = "Fix the max energy value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-fix-bandwidth", metavar = "Hz", type = "float", action="append", help = "Fix the bandwidth value of the BTLWNB injections. Give several times with different values to build up an array of bandwidths to choose from. Overrides min and max options.")
