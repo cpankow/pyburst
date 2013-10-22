@@ -253,7 +253,6 @@ if opts.store_sngl == "sngl_inspiral":
 
 i = 0
 for row in sims:
-	if i >= 3: break
 	i += 1
 	snr = {}
 	for d, det in detectors.iteritems():
