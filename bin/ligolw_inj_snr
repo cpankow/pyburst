@@ -260,11 +260,13 @@ for row in sims:
 
 		# inspiral case
 		if type(row) == lalmetaio.SimInspiralTable:
+			time = row.geocent_end_time + 1e-9*row.geocent_end_time_ns
 			hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
+			hp.epoch += time
+			hx.epoch += time
 			# FIXME: adjust epoch
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.latitude, row.longitude, row.polarization, det )
-			time = row.geocent_end_time + 1e-9*row.geocent_end_time_ns
 			ra, dec, psi = row.longitude, row.latitude, row.polarization
 		# burst case
 		elif type(row) == lalmetaio.SimBurst:
