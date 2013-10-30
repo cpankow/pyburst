@@ -171,6 +171,7 @@ optp.add_option("--coherent-snr-cut-thresh", type=float, help="Cut any injection
 optp.add_option("--coherent-amplitude-cut-thresh", type=float, help="Cut any injection with a cWB coherent ampltiude (eta) less than this.")
 optp.add_option("--store-sngl", help="Store the values of the simulated event and SNR calculation in an sngl_* event row. Valid choices are sngl_inspiral.")
 optp.add_option("--squeeze-attribute", default="hrss", help="Squeeze this attribute for injections so as to make the more detectable. Default is 'hrss'. You might try 'distance' for SimInspirals.")
+optp.add_option("--sim-id", type=int, help="Only calculate for simulation_id N")
 
 opts, args = optp.parse_args()
 
@@ -255,6 +256,10 @@ i = 0
 for row in sims:
 	i += 1
 	snr = {}
+
+	if opts.sim_id is not None and opts.sim_id != int(row.simulation_id):
+		continue
+
 	for d, det in detectors.iteritems():
 		psd = detector_psds[d]
 
@@ -411,6 +416,9 @@ if opts.store_sngl == "sngl_inspiral":
 if len(cut_sims) > 0:
 	print "Writing cut XML file."
 	utils.write_filename( xmldoc, "cut_tmp.xml" )
+
+if opts.sim_id is not None:
+    exit()
 
 from pylal import imr_utils
 from pylal import rate
