@@ -271,7 +271,7 @@ for row in sims:
 			hx.epoch += time
 			# FIXME: adjust epoch
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
-				row.latitude, row.longitude, row.polarization, det )
+				row.longitude, row.latitude, row.polarization, det )
 			ra, dec, psi = row.longitude, row.latitude, row.polarization
 		# burst case
 		elif type(row) == lalmetaio.SimBurst:
