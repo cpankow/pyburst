@@ -96,7 +96,7 @@ def parse_psd_func( funcstr ):
 
 def sim_to_sngl_table(sim_type, table_type):
 	column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
-	return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns"])
+	return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
 
 def sim_to_sngl_insp(sim, ifo, sngl_table):
 	if "SimInspiral" in str(sim): # Don't ask
@@ -309,8 +309,8 @@ for row in sims:
 		print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
 		if opts.store_sngl == "sngl_inspiral":
 			sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
-		sngl_row.snr = snr[d]
-		sngl_row.event_id = sngl_table.get_next_id()
+			sngl_row.snr = snr[d]
+			sngl_row.event_id = sngl_table.get_next_id()
 
 	net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
 	print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
