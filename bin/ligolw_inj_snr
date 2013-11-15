@@ -160,6 +160,8 @@ optp = OptionParser()
 optp.add_option("--det-psd-func", action="append", help="Set a detector to use in the network with the corresponding PSD function from lalsimulation. Example: --det-psd-func H1=SimNoisePSDaLIGOZeroDetHighPower. Can be set multiple times to add more detectors to the network.")
 optp.add_option("--waveform-length", type=float, default=32.0, help="Length of waveform in seconds. Note that this affects the binning of the PSD. Default is 32 s")
 optp.add_option("--nyquist-frequency", type=float, default=4096.0, help="Nyquist frequency of the PSD to generate. Default is 4096 Hz.")
+optp.add_option("--low-frequency-cutoff", type=float, default=0.0, help="Frequency at which to start the integration. The max of the waveform f_lower or this option is used. Default is 0.")
+optp.add_option("--high-frequency-cutoff", type=float, help="Frequency at which to end the integration. The min of the nyquist frequency or this option is used. Default is 0.")
 
 optp.add_option("--snr-thresh", type=float, default=8.0, help="SNR threshold (network) to use for efficiency measurement. Default is 8.")
 optp.add_option("--eff-attribute", default="hrss", help="SimBurst attribute against which to measure efficiency. Default is 'hrss', valid choices are any SimBurst attribute.")
@@ -269,18 +271,21 @@ for row in sims:
 			hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
 			hp.epoch += time
 			hx.epoch += time
-			# FIXME: adjust epoch
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.longitude, row.latitude, row.polarization, det )
 			ra, dec, psi = row.longitude, row.latitude, row.polarization
+			f_low_wave = row.f_lower
 		# burst case
 		elif type(row) == lalmetaio.SimBurst:
 			hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
-			# FIXME: adjust epoch
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.ra, row.dec, row.psi, det )
 			time = row.time_geocent_gps
 			ra, dec, psi = row.ra, row.dec, row.psi
+			# FIXME: What's the f_lower for a burst? central_freq - 2*band?
+			# more over, that might not make sense for things like cosmic 
+			# strings
+			f_low_wave = 0
 		else:
 			raise TypeError("%s: It's not a burst, and it's not an inspiral... what do you want me to do here?" % type(row))
 
@@ -306,9 +311,16 @@ for row in sims:
 		lal.REAL8TimeFreqFFT( hf, h, fwdplan )
 		injection_waveforms[d] = hf
 
-		# divide and sum for SNR
 		hrss = hf.data.data.conj() * hf.data.data
-		nw_ip = ( hrss / psd )
+		# Determine limits of integration
+		int_f_low_bin = max(opts.low_frequency_cutoff, f_low_wave)
+		print "Low frequency of integration %f" % int_f_low_bin
+		int_f_low_bin = int(numpy.round(int_f_low_bin/hf.deltaF))
+		int_f_high_bin = min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency)
+		print "High frequency of integration %f" % int_f_high_bin
+		int_f_high_bin = int(numpy.round(int_f_high_bin/hf.deltaF))
+		# divide and sum for SNR
+		nw_ip = ( hrss / psd )[int_f_low_bin:int_f_high_bin]
 		power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
 		snr[d] = numpy.sqrt(power)
 		print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
