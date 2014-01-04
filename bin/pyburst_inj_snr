@@ -40,6 +40,8 @@ def copy_sim_inspiral( row ):
 			setattr( swigrow, simattr, str(getattr(row, simattr)) )
 		else:
 			setattr( swigrow, simattr, getattr(row, simattr) )
+	# FIXME: This doesn't get copied properly, and so is done manually here.
+	swigrow.geocent_end_time.gpsNanoSeconds = row.geocent_end_time_ns
 	return swigrow
 
 def copy_sim_burst( row ):
