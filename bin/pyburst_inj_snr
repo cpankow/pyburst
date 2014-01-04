@@ -119,6 +119,28 @@ def sim_to_sngl_insp(sim, ifo, sngl_table):
 	sngl_table.append(sngl_row)
 	return sngl_row
 
+
+def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
+	"""
+	Determine the single IFO SNR of a frequency domain waveform hf, with a given psd. If no psd is supplied (None), then return the hrss. Integration will take place over f_low (0 by default) to f_high (likely nyquist).
+	"""
+	hrss = hf.data.data.conj() * hf.data.data
+	if psd is None:
+		return sqrt(hrss.sum())
+	# Determine limits of integration
+	#print "Low frequency of integration %f" % int_f_low_bin
+	int_f_low_bin = int(numpy.round(f_low/hf.deltaF))
+	#print "High frequency of integration %f" % int_f_high_bin
+	if f_high is None:
+		# FIXME: Assumes the hf, psd have the same deltaF and f0
+		int_f_high_bin = min(len(hf.data.data), len(psd.data.data))
+	else:
+		int_f_high_bin = int(numpy.round(f_high/hf.deltaF))
+	# divide and sum for SNR
+	nw_ip = ( hrss / psd )[int_f_low_bin:int_f_high_bin]
+	power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
+	return numpy.sqrt(power)
+
 #
 # Efficiency calcualtion routines
 #
@@ -170,6 +192,14 @@ optp.add_option("--eff-attribute", default="hrss", help="SimBurst attribute agai
 optp.add_option("--eff-bins", default=20, type=int, help="Number of bins over which to measure efficiency. Default is 20.")
 optp.add_option("--eff-rank", default="netSNR", help="How to rank injections for efficiency purposes. Valid choices are ``netSNR'' (network SNR), ``cohSNR'' (coherent SNR), and ``eta'' (cWB network amplitude). Default is netSNR.")
 
+optp.add_option("--calculate-only", action="store_true", help="Do not perform any injection cutting or squeezing, calculate values only.")
+optp.add_option("--machine-parse", action="store_true", help="Print in a machine parseable way.")
+optp.add_option("--no-print-single-ifo", action="store_true", default=False, help="Don't print individual IFO SNRs.")
+optp.add_option("--no-print-network", action="store_true", default=False, help="Don't print network SNRs.")
+optp.add_option("--no-print-coherent", action="store_true", default=False, help="Don't print coherent SNRs.")
+optp.add_option("--no-print-cwb", action="store_true", default=False, help="Don't print CWB ampltiudes.")
+optp.add_option("--verbose", action="store_true", help="Be verbose.")
+
 optp.add_option("--single-snr-cut-thresh", type=float, help="Cut any injection with a single detector SNR less than this.")
 optp.add_option("--coherent-snr-cut-thresh", type=float, help="Cut any injection with a coherent SNR less than this.")
 optp.add_option("--coherent-amplitude-cut-thresh", type=float, help="Cut any injection with a cWB coherent ampltiude (eta) less than this.")
@@ -201,10 +231,12 @@ for dspec in opts.det_psd_func:
 	det, psdfunc = dspec.split("=")
 	# Secondary mapping of psdfuncs to actual numerical arrays
 	if os.path.isfile( psdfunc ):
-		print "Detector %s will use %s as the PSD" % (det, psdfunc)
+		if opts.verbose:
+			print "Detector %s will use %s as the PSD" % (det, psdfunc)
 		detector_psds[det] = numpy.array(parse_psd_file( psdfunc )(f))
 	else:
-		print "Looking up function %s in lalsimulation for use with %s as the PSD" % (psdfunc, det)
+		if opts.verbose:
+			print "Looking up function %s in lalsimulation for use with %s as the PSD" % (psdfunc, det)
 		detector_psds[det] = numpy.array(map(parse_psd_func( psdfunc ), f))
 	# Set DC sensitivity to something sensible, since it often comes out nan
 	detector_psds[det][0] = detector_psds[det][1]
@@ -235,13 +267,15 @@ try:
 	sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
 	sims.extend( map(copy_sim_burst, sim_burst) )
 except ValueError:
-	print >>sys.stderr, "No SimBurst table found, skipping..."
+	if opts.verbose:
+		print >>sys.stderr, "No SimBurst table found, skipping..."
 sim_insp = []
 try:
 	sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
 	sims.extend( map(copy_sim_inspiral, sim_insp) )
 except ValueError:
-	print >>sys.stderr, "No SimInspiral table found, skipping..."
+	if opts.verbose:
+		print >>sys.stderr, "No SimInspiral table found, skipping..."
 
 snr_thresh = opts.snr_thresh
 injected, efficiencies, count = defaultdict(list), defaultdict(list), defaultdict(lambda: 0)
@@ -276,7 +310,7 @@ for row in sims:
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.longitude, row.latitude, row.polarization, det )
 			ra, dec, psi = row.longitude, row.latitude, row.polarization
-			f_low_wave = row.f_lower
+			f_low_wave = max(opts.low_frequency_cutoff, row.f_lower)
 		# burst case
 		elif type(row) == lalmetaio.SimBurst:
 			hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
@@ -287,7 +321,7 @@ for row in sims:
 			# FIXME: What's the f_lower for a burst? central_freq - 2*band?
 			# more over, that might not make sense for things like cosmic 
 			# strings
-			f_low_wave = 0
+			f_low_wave = max(opts.low_frequency_cutoff, 0)
 		else:
 			raise TypeError("%s: It's not a burst, and it's not an inspiral... what do you want me to do here?" % type(row))
 
@@ -313,26 +347,21 @@ for row in sims:
 		lal.REAL8TimeFreqFFT( hf, h, fwdplan )
 		injection_waveforms[d] = hf
 
-		hrss = hf.data.data.conj() * hf.data.data
-		# Determine limits of integration
-		int_f_low_bin = max(opts.low_frequency_cutoff, f_low_wave)
-		print "Low frequency of integration %f" % int_f_low_bin
-		int_f_low_bin = int(numpy.round(int_f_low_bin/hf.deltaF))
-		int_f_high_bin = min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency)
-		print "High frequency of integration %f" % int_f_high_bin
-		int_f_high_bin = int(numpy.round(int_f_high_bin/hf.deltaF))
-		# divide and sum for SNR
-		nw_ip = ( hrss / psd )[int_f_low_bin:int_f_high_bin]
-		power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
-		snr[d] = numpy.sqrt(power)
-		print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
+		snr[d] = hoff_single_ifo_snr(hf, psd, f_low_wave, min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency))
+		if opts.machine_parse and not opts.no_print_single_ifo:
+			print snr[d]
+		elif not opts.no_print_single_ifo:
+			print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
 		if opts.store_sngl == "sngl_inspiral":
 			sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
 			sngl_row.snr = snr[d]
 			sngl_row.event_id = sngl_table.get_next_id()
 
 	net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
-	print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
+	if opts.machine_parse and not opts.no_print_network:
+		print "%f" % net_snr
+	elif not opts.no_print_network:
+		print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
 
 	#
 	# Coherent SNR
@@ -370,7 +399,10 @@ for row in sims:
 	# Creighton and Anderson eq. 7.138
 	coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
 	coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
-	print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
+	if opts.machine_parse and not opts.no_print_coherent:
+		print "%g" % numpy.sqrt(coh_snr)
+	elif not opts.no_print_coherent:
+		print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
 
 	coh_energy = 0
 	coh_energy_mat = {}
@@ -379,7 +411,10 @@ for row in sims:
 		coh_energy += coh_energy_mat[(d1,d2)]
 
 	eta_est = numpy.sqrt(abs(coh_energy)/len(detectors.values()))
-	print "Estimated cWB ranking statistic (1G) %g" % eta_est
+	if opts.machine_parse and not opts.no_print_cwb:
+		print "%g" % eta_est
+	elif not opts.no_print_cwb:
+		print "Estimated cWB ranking statistic (1G) %g" % eta_est
 
 	if opts.single_snr_cut_thresh is not None and any(map(lambda s: s < opts.single_snr_cut_thresh, snr.values())):
 		cut_sims.append( (type(row), row.simulation_id ) )
@@ -397,6 +432,9 @@ for row in sims:
 
 	injected[row.waveform].append( row )
 	count[row.waveform] += 1
+
+if opts.calculate_only:
+    exit(0)
 
 try:
 	sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
@@ -439,8 +477,9 @@ from pylal import rate
 
 for wave, eff in efficiencies.iteritems():
 	ndet = len(eff)
-	print "Report for waveform family %s" % wave
-	print "Efficiency: %d / %d = %f" % (ndet, count[wave], float(ndet)/count[wave])
+	if opts.verbose:
+		print "Report for waveform family %s" % wave
+		print "Efficiency: %d / %d = %f" % (ndet, count[wave], float(ndet)/count[wave])
 
 	# Number of injections for this type
 	inj = injected[wave]
@@ -456,7 +495,8 @@ for wave, eff in efficiencies.iteritems():
 	#
 	cents = eff.centres()[0]
 	for c, ef, er in zip(eff.centres()[0], eff.array, err.array):
-		print "%2.1g %2.1f +/- %0.2f" % (c, ef, er)
+		if opts.verbose:
+			print "%2.1g %2.1f +/- %0.2f" % (c, ef, er)
 	try:
 		attr_scale = numpy.average(map(lambda sim: getattr(sim, eff_attr), inj))
 		a, b = get_eff_params( cents, eff.array, attr_scale )
@@ -464,7 +504,8 @@ for wave, eff in efficiencies.iteritems():
 		print >>sys.stderr, "Warning, couldn't fit efficiency, check bins. Skipping..."
 		continue
 	ten, fifty, ninety = determine_10_50_90_eff( (a,b) )
-	print "10%% / 50%% / 90%% efficiency estimate: %2.2g %2.2g %2.2g" % (ten, fifty, ninety)
+	if opts.verbose:
+		print "10%% / 50%% / 90%% efficiency estimate: %2.2g %2.2g %2.2g" % (ten, fifty, ninety)
 
 	if opts.squeeze_attribute is not None:
 		#new_range = ( max(0, ninety - (ninety-ten)), ten + (ninety-ten) )
@@ -481,7 +522,8 @@ for wave, eff in efficiencies.iteritems():
 
 		orig_range = sorted( orig_range )
 		orig_range = (orig_range[0], orig_range[-1])
-		print "Squeeze distribution %s according to efficiency values. Will map %s -> %s" % (opts.squeeze_attribute, str(orig_range), str(new_range))
+		if opts.verbose:
+			print "Squeeze distribution %s according to efficiency values. Will map %s -> %s" % (opts.squeeze_attribute, str(orig_range), str(new_range))
 
 		for sim in sim_burst:
 			if sim.waveform != wave: 
