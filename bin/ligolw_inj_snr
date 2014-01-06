@@ -433,9 +433,6 @@ for row in sims:
 	injected[row.waveform].append( row )
 	count[row.waveform] += 1
 
-if opts.calculate_only:
-    exit(0)
-
 try:
 	sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
 	sb_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimBurst, cut_sims))
@@ -464,6 +461,9 @@ if opts.store_sngl == "sngl_inspiral":
 	process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
 	ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
 	utils.write_filename(xmldoc, "%s-FAKE_SEARCH.xml.gz" % ifos, gz=True)
+
+if opts.calculate_only:
+    exit(0)
 
 if len(cut_sims) > 0:
 	print "Writing cut XML file."
