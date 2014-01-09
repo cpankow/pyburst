@@ -303,7 +303,7 @@ for row in sims:
 
 		# inspiral case
 		if type(row) == lalmetaio.SimInspiralTable:
-			time = row.geocent_end_time + 1e-9*row.geocent_end_time_ns
+			time = row.geocent_end_time
 			hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
 			hp.epoch += time
 			hx.epoch += time
@@ -316,7 +316,6 @@ for row in sims:
 			hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.ra, row.dec, row.psi, det )
-			time = row.time_geocent_gps
 			ra, dec, psi = row.ra, row.dec, row.psi
 			# FIXME: What's the f_lower for a burst? central_freq - 2*band?
 			# more over, that might not make sense for things like cosmic 
