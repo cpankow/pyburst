@@ -231,7 +231,7 @@ sg_section.add_option("--sg-max-q", metavar = "Q", type = "float", help = "Fix t
 sg_section.add_option("--sg-fix-f", metavar = "Hz", action="append", type = "float", help = "Fix the central frequency value of the SineGaussian injections. Give several times with different values to build up an array of frequencies to choose from. Overrides min and max options.")
 sg_section.add_option("--sg-min-f", metavar = "Hz", type = "float", help = "Fix the min frequency value of the SineGaussian injections.")
 sg_section.add_option("--sg-max-f", metavar = "Hz", type = "float", help = "Fix the max frequency value of the SineGaussian injections.")
-sg_section.add_option("--sg-polarization-type", metavar = "type", help = "Fix the polarization type of the SineGaussian injections. Valid types are linear, circular, and elliptical.")
+sg_section.add_option("--sg-polarization-type", metavar = "type", default='elliptical', help = "Fix the polarization type of the SineGaussian injections. Valid types are linear, circular, and elliptical. Default is elliptical.")
 parser.add_option_group(sg_section)
 
 wnb_section = OptionGroup(parser, "Band and time limited white noise burst (BTLWNB) options", "This group controls the distribution of BTLWNB injections.")
