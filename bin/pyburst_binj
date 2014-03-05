@@ -411,7 +411,7 @@ for src in srcs:
 	
 		sim.append(row)
 
-utils.write_filename(xmldoc, options.output)
+utils.write_filename(xmldoc, options.output, gz=options.output.endswith("gz"))
 
 if options.write_mdc_log:
 	mdc_log = []
