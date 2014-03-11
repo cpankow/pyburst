@@ -30,184 +30,184 @@ import lalinspiral
 #
 
 def copy_sim_inspiral( row ):
-	"""
-	Turn a lsctables.SimInspiral into a SWIG wrapped lalburst.SimInspiral
-	"""
-	swigrow = lalmetaio.SimInspiralTable()
-	for simattr in lsctables.SimInspiralTable.validcolumns.keys():
-		if simattr in ["waveform", "source", "numrel_data", "taper"]:
-			# unicode -> char* doesn't work
-			setattr( swigrow, simattr, str(getattr(row, simattr)) )
-		else:
-			setattr( swigrow, simattr, getattr(row, simattr) )
-	# FIXME: This doesn't get copied properly, and so is done manually here.
-	swigrow.geocent_end_time.gpsNanoSeconds = row.geocent_end_time_ns
-	return swigrow
+    """
+    Turn a lsctables.SimInspiral into a SWIG wrapped lalburst.SimInspiral
+    """
+    swigrow = lalmetaio.SimInspiralTable()
+    for simattr in lsctables.SimInspiralTable.validcolumns.keys():
+        if simattr in ["waveform", "source", "numrel_data", "taper"]:
+            # unicode -> char* doesn't work
+            setattr( swigrow, simattr, str(getattr(row, simattr)) )
+        else:
+            setattr( swigrow, simattr, getattr(row, simattr) )
+    # FIXME: This doesn't get copied properly, and so is done manually here.
+    swigrow.geocent_end_time.gpsNanoSeconds = row.geocent_end_time_ns
+    return swigrow
 
 def copy_sim_burst( row ):
-	"""
-	Turn a lsctables.SimBurst into a SWIG wrapped lalburst.SimBurst
-	"""
-	
-	swigrow = lalburst.CreateSimBurst()
-	swigrow.hrss = row.hrss or 0
-	time = lal.LIGOTimeGPS( row.time_geocent_gps, row.time_geocent_gps_ns )
-	swigrow.time_geocent_gps = time
-	swigrow.psi = row.psi
-	swigrow.amplitude = row.amplitude or 0
-	swigrow.egw_over_rsquared = row.egw_over_rsquared or 0
-	swigrow.waveform_number = row.waveform_number or 0
-	swigrow.pol_ellipse_angle = row.pol_ellipse_angle or 0.0
-	swigrow.simulation_id = int(row.simulation_id)
-	swigrow.q = row.q or 0.0
-	swigrow.waveform = str(row.waveform)
-	swigrow.bandwidth = row.bandwidth or 0.0
-	swigrow.process_id = int(row.process_id) 
-	swigrow.frequency = row.frequency or 0.0
-	swigrow.ra = row.ra
-	swigrow.time_geocent_gmst = row.time_geocent_gmst or 0
-	swigrow.pol_ellipse_e = row.pol_ellipse_e or 0.0
-	swigrow.duration = row.duration or 0.0
-	swigrow.dec = row.dec
+    """
+    Turn a lsctables.SimBurst into a SWIG wrapped lalburst.SimBurst
+    """
 
-	return swigrow
+    swigrow = lalburst.CreateSimBurst()
+    swigrow.hrss = row.hrss or 0
+    time = lal.LIGOTimeGPS( row.time_geocent_gps, row.time_geocent_gps_ns )
+    swigrow.time_geocent_gps = time
+    swigrow.psi = row.psi
+    swigrow.amplitude = row.amplitude or 0
+    swigrow.egw_over_rsquared = row.egw_over_rsquared or 0
+    swigrow.waveform_number = row.waveform_number or 0
+    swigrow.pol_ellipse_angle = row.pol_ellipse_angle or 0.0
+    swigrow.simulation_id = int(row.simulation_id)
+    swigrow.q = row.q or 0.0
+    swigrow.waveform = str(row.waveform)
+    swigrow.bandwidth = row.bandwidth or 0.0
+    swigrow.process_id = int(row.process_id)
+    swigrow.frequency = row.frequency or 0.0
+    swigrow.ra = row.ra
+    swigrow.time_geocent_gmst = row.time_geocent_gmst or 0
+    swigrow.pol_ellipse_e = row.pol_ellipse_e or 0.0
+    swigrow.duration = row.duration or 0.0
+    swigrow.dec = row.dec
+
+    return swigrow
 
 def parse_psd_file( filestr ):
-	"""
-	Map the user-provided PSD file string into a function to be called as PSD(f).
-	"""
-	try:
-		xmldoc = utils.load_filename(filestr)
-		psd = read_psd_xmldoc(xmldoc).values()[0]
-		f = numpy.arange(0, len(psd.data)*psd.deltaF, psd.deltaF)
-		psd = psd.data
-	except:
-		f, psd = numpy.loadtxt( filestr, unpack=True )
-	def anon_interp( fvals ):
-		return numpy.interp( fvals, f, psd )
-	return anon_interp
+    """
+    Map the user-provided PSD file string into a function to be called as PSD(f).
+    """
+    try:
+        xmldoc = utils.load_filename(filestr)
+        psd = read_psd_xmldoc(xmldoc).values()[0]
+        f = numpy.arange(0, len(psd.data)*psd.deltaF, psd.deltaF)
+        psd = psd.data
+    except:
+        f, psd = numpy.loadtxt( filestr, unpack=True )
+    def anon_interp( fvals ):
+        return numpy.interp( fvals, f, psd )
+    return anon_interp
 
 def parse_psd_func( funcstr ):
-	"""
-	Map the user-provided PSD function string to its equivalent function in lalsimulation.
-	"""
-	try:
-		return getattr( lalsimulation, funcstr )
-	except AttributeError:
-		raise AttributeError( "Could not find PSD function %s in lalsimulation" % funcstr )
+    """
+    Map the user-provided PSD function string to its equivalent function in lalsimulation.
+    """
+    try:
+        return getattr( lalsimulation, funcstr )
+    except AttributeError:
+        raise AttributeError( "Could not find PSD function %s in lalsimulation" % funcstr )
 
 def sim_to_sngl_table(sim_type, table_type):
-	column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
-	if sim_type == lsctables.SimInspiralTable:
-		return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
-	elif sim_type == lsctables.SimBurstTable:
-		return lsctables.New(table_type, column_over + ["search", "central_freq", "ifo", "event_id", "peak_time", "peak_time_ns", "snr"])
+    column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
+    if sim_type == lsctables.SimInspiralTable:
+        return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
+    elif sim_type == lsctables.SimBurstTable:
+        return lsctables.New(table_type, column_over + ["search", "central_freq", "ifo", "event_id", "peak_time", "peak_time_ns", "snr"])
 
 def sim_to_sngl_insp(sim, ifo, sngl_table):
-	"""
-	Take the information in sim and transfer overlapping information to a SnglInspiral row, thus appended to sngl_table.
-	"""
-	if "SimInspiral" in str(sim): # Don't ask
-		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
-	else:
-		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
-	sngl_row = sngl_table.RowType()
-	for col in column_over:
-		setattr(sngl_row, col, getattr(sim, col))
+    """
+    Take the information in sim and transfer overlapping information to a SnglInspiral row, thus appended to sngl_table.
+    """
+    if "SimInspiral" in str(sim): # Don't ask
+        column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
+    else:
+        column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
+    sngl_row = sngl_table.RowType()
+    for col in column_over:
+        setattr(sngl_row, col, getattr(sim, col))
 
-	sngl_row.set_end( gluelal.LIGOTimeGPS(
-    		int(getattr(sim, "%s_end_time" % ifo[0].lower())),
-    		getattr(sim, "%s_end_time_ns" % ifo[0].lower()) ) )
-	sngl_row.ifo = ifo
-	sngl_row.search = "fake"
-	sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
-	if isinstance(sim, lsctables.SimInspiral):
-		sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
-	sngl_table.append(sngl_row)
-	return sngl_row
+    sngl_row.set_end( gluelal.LIGOTimeGPS(
+            int(getattr(sim, "%s_end_time" % ifo[0].lower())),
+            getattr(sim, "%s_end_time_ns" % ifo[0].lower()) ) )
+    sngl_row.ifo = ifo
+    sngl_row.search = "fake"
+    sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
+    if isinstance(sim, lsctables.SimInspiral):
+        sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
+    sngl_table.append(sngl_row)
+    return sngl_row
 
 def sim_to_sngl_burst(sim, ifo, sngl_table):
-	"""
-	Take the information in sim and transfer overlapping information to a SnglBurst row, thus appended to sngl_table.
-	"""
-	if "SimInspiral" in str(sim): # Don't ask
-		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
-	else:
-		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
-	sngl_row = sngl_table.RowType()
-	for col in column_over:
-		setattr(sngl_row, col, getattr(sim, col))
+    """
+    Take the information in sim and transfer overlapping information to a SnglBurst row, thus appended to sngl_table.
+    """
+    if "SimInspiral" in str(sim): # Don't ask
+        column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
+    else:
+        column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
+    sngl_row = sngl_table.RowType()
+    for col in column_over:
+        setattr(sngl_row, col, getattr(sim, col))
 
-	sngl_row.set_peak(gluelal.LIGOTimeGPS( sim.time_geocent_gps.gpsSeconds, sim.time_geocent_gps.gpsNanoSeconds))
-	if sim.bandwidth is not None:
-		sngl_row.central_freq = sim.frequency + sim.bandwidth/2.0
-	else:
-		sngl_row.central_freq = sim.frequency
-	sngl_row.ifo = ifo
-	sngl_row.search = "fake"
-	sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
-	sngl_table.append(sngl_row)
-	return sngl_row
+    sngl_row.set_peak(gluelal.LIGOTimeGPS( sim.time_geocent_gps.gpsSeconds, sim.time_geocent_gps.gpsNanoSeconds))
+    if sim.bandwidth is not None:
+        sngl_row.central_freq = sim.frequency + sim.bandwidth/2.0
+    else:
+        sngl_row.central_freq = sim.frequency
+    sngl_row.ifo = ifo
+    sngl_row.search = "fake"
+    sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
+    sngl_table.append(sngl_row)
+    return sngl_row
 
 def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
-	"""
-	Determine the single IFO SNR of a frequency domain waveform hf, with a given psd. If no psd is supplied (None), then return the hrss. Integration will take place over f_low (0 by default) to f_high (likely nyquist).
-	"""
-	hrss = hf.data.data.conj() * hf.data.data
-	if psd is None:
-		return sqrt(hrss.sum())
-	# Determine limits of integration
-	#print "Low frequency of integration %f" % int_f_low_bin
-	int_f_low_bin = int(numpy.round(f_low/hf.deltaF))
-	#print "High frequency of integration %f" % int_f_high_bin
-	if f_high is None:
-		# FIXME: Assumes the hf, psd have the same deltaF and f0
-		int_f_high_bin = min(len(hf.data.data), len(psd.data.data))
-	else:
-		int_f_high_bin = int(numpy.round(f_high/hf.deltaF))
-	# divide and sum for SNR
-	nw_ip = ( hrss / psd )[int_f_low_bin:int_f_high_bin]
-	power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
-	return numpy.sqrt(power)
+    """
+    Determine the single IFO SNR of a frequency domain waveform hf, with a given psd. If no psd is supplied (None), then return the hrss. Integration will take place over f_low (0 by default) to f_high (likely nyquist).
+    """
+    hrss = hf.data.data.conj() * hf.data.data
+    if psd is None:
+        return sqrt(hrss.sum())
+    # Determine limits of integration
+    #print "Low frequency of integration %f" % int_f_low_bin
+    int_f_low_bin = int(numpy.round(f_low/hf.deltaF))
+    #print "High frequency of integration %f" % int_f_high_bin
+    if f_high is None:
+        # FIXME: Assumes the hf, psd have the same deltaF and f0
+        int_f_high_bin = min(len(hf.data.data), len(psd.data.data))
+    else:
+        int_f_high_bin = int(numpy.round(f_high/hf.deltaF))
+    # divide and sum for SNR
+    nw_ip = ( hrss / psd )[int_f_low_bin:int_f_high_bin]
+    power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
+    return numpy.sqrt(power)
 
 #
 # Efficiency calcualtion routines
 #
 
 def loglogistic( x, alpha, beta ):
-	"""
-	The log-logistic CDF distribution with parameters alpha (scale), beta (dispersion).
-	"""
-	return 1.0/(1+(x/alpha)**(-beta))
+    """
+    The log-logistic CDF distribution with parameters alpha (scale), beta (dispersion).
+    """
+    return 1.0/(1+(x/alpha)**(-beta))
 
 def loglogisticinv( y, alpha, beta ):
-	"""
-	The inverse of the log-logistic CDF distribution.
-	"""
-	return alpha*(1.0/y - 1)**(-1.0/beta)
+    """
+    The inverse of the log-logistic CDF distribution.
+    """
+    return alpha*(1.0/y - 1)**(-1.0/beta)
 
 def get_eff_params( xbins, ybins, alpha0=5e-24, beta0=1 ):
-	"""
-	Fit the data to a loglogistic CDF curve to get the parameters for efficiency values.
-	"""
-	params, corr = scipy.optimize.curve_fit( loglogistic, xbins, ybins, (alpha0, beta0) )
-	return params
+    """
+    Fit the data to a loglogistic CDF curve to get the parameters for efficiency values.
+    """
+    params, corr = scipy.optimize.curve_fit( loglogistic, xbins, ybins, (alpha0, beta0) )
+    return params
 
 def determine_10_50_90_eff( params ):
-	"""
-	Use fit parameters to invert the efficiency function and figure out the statistic values at 10%, 50%, and 90%.
-	"""
-	a, b = params
-	return (loglogisticinv(0.1, a, b), loglogisticinv(0.5, a, b), loglogisticinv(0.9, a, b))
+    """
+    Use fit parameters to invert the efficiency function and figure out the statistic values at 10%, 50%, and 90%.
+    """
+    a, b = params
+    return (loglogisticinv(0.1, a, b), loglogisticinv(0.5, a, b), loglogisticinv(0.9, a, b))
 
 def rescale_number( x, orig_intv, new_intv ):
-	"""
-	Rescale a number x which lines within the original interval orig_intv such that it occupies the same ``rank'' within the new interval new_intv.
-	TODO: Allow for a two-sided interval such that the rescaling is about the mean.
-	"""
-	oint = orig_intv[1] - orig_intv[0]
-	nint = new_intv[1] - new_intv[0]
-	return ( (x - orig_intv[0])/oint * nint ) + new_intv[0]
+    """
+    Rescale a number x which lines within the original interval orig_intv such that it occupies the same ``rank'' within the new interval new_intv.
+    TODO: Allow for a two-sided interval such that the rescaling is about the mean.
+    """
+    oint = orig_intv[1] - orig_intv[0]
+    nint = new_intv[1] - new_intv[0]
+    return ( (x - orig_intv[0])/oint * nint ) + new_intv[0]
 
 optp = OptionParser()
 optp.add_option("--det-psd-func", action="append", help="Set a detector to use in the network with the corresponding PSD function from lalsimulation. Example: --det-psd-func H1=SimNoisePSDaLIGOZeroDetHighPower. Can be set multiple times to add more detectors to the network.")
@@ -242,9 +242,9 @@ opts, args = optp.parse_args()
 # Detector, PSD setup
 #
 
-detectors = {"H1": lal.lalCachedDetectors[lal.LAL_LHO_4K_DETECTOR], 
-	     "L1": lal.lalCachedDetectors[lal.LAL_LLO_4K_DETECTOR], 
-	     "V1": lal.lalCachedDetectors[lal.LAL_VIRGO_DETECTOR]}
+detectors = {"H1": lal.lalCachedDetectors[lal.LAL_LHO_4K_DETECTOR],
+             "L1": lal.lalCachedDetectors[lal.LAL_LLO_4K_DETECTOR],
+             "V1": lal.lalCachedDetectors[lal.LAL_VIRGO_DETECTOR]}
 uniq_det_comb = list( itertools.combinations( detectors.keys(), 2 ) )
 
 # Default is R=8192, and data with a length of 32 seconds. Sorta excessive.
@@ -255,27 +255,27 @@ eff_attr = opts.eff_attribute
 f = numpy.linspace(0, int(fnyq/deltaF), int(fnyq/deltaF)+1)*deltaF
 detector_psds = {}
 if opts.det_psd_func is None:
-	raise ArgumentError("Need at least one detector / PSD specified.")
+    raise ArgumentError("Need at least one detector / PSD specified.")
 for dspec in opts.det_psd_func:
-	det, psdfunc = dspec.split("=")
-	# Secondary mapping of psdfuncs to actual numerical arrays
-	if os.path.isfile( psdfunc ):
-		if opts.verbose:
-			print "Detector %s will use %s as the PSD" % (det, psdfunc)
-		detector_psds[det] = numpy.array(parse_psd_file( psdfunc )(f))
-	else:
-		if opts.verbose:
-			print "Looking up function %s in lalsimulation for use with %s as the PSD" % (psdfunc, det)
-		detector_psds[det] = numpy.array(map(parse_psd_func( psdfunc ), f))
-	# Set DC sensitivity to something sensible, since it often comes out nan
-	detector_psds[det][0] = detector_psds[det][1]
+    det, psdfunc = dspec.split("=")
+    # Secondary mapping of psdfuncs to actual numerical arrays
+    if os.path.isfile( psdfunc ):
+        if opts.verbose:
+            print "Detector %s will use %s as the PSD" % (det, psdfunc)
+        detector_psds[det] = numpy.array(parse_psd_file( psdfunc )(f))
+    else:
+        if opts.verbose:
+            print "Looking up function %s in lalsimulation for use with %s as the PSD" % (psdfunc, det)
+        detector_psds[det] = numpy.array(map(parse_psd_func( psdfunc ), f))
+    # Set DC sensitivity to something sensible, since it often comes out nan
+    detector_psds[det][0] = detector_psds[det][1]
 
 if len(detector_psds) == 0:
-	raise ArgumentError("Need at least one detector / PSD specified.")
+    raise ArgumentError("Need at least one detector / PSD specified.")
 
 for d in detectors.keys():
-	if d not in detector_psds.keys():
-		del detectors[d]
+    if d not in detector_psds.keys():
+        del detectors[d]
 
 #
 # Generate required FFT plans
@@ -293,18 +293,18 @@ xmldoc = utils.load_filename( args[0] )
 sims = []
 sim_burst = []
 try:
-	sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
-	sims.extend( map(copy_sim_burst, sim_burst) )
+    sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
+    sims.extend( map(copy_sim_burst, sim_burst) )
 except ValueError:
-	if opts.verbose:
-		print >>sys.stderr, "No SimBurst table found, skipping..."
+    if opts.verbose:
+        print >>sys.stderr, "No SimBurst table found, skipping..."
 sim_insp = []
 try:
-	sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
-	sims.extend( map(copy_sim_inspiral, sim_insp) )
+    sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
+    sims.extend( map(copy_sim_inspiral, sim_insp) )
 except ValueError:
-	if opts.verbose:
-		print >>sys.stderr, "No SimInspiral table found, skipping..."
+    if opts.verbose:
+        print >>sys.stderr, "No SimInspiral table found, skipping..."
 
 snr_thresh = opts.snr_thresh
 injected, efficiencies, count = defaultdict(list), defaultdict(list), defaultdict(lambda: 0)
@@ -317,194 +317,194 @@ cut_sims = []
 
 # Store realized SNRs in Sngl* rows
 if opts.store_sngl == "sngl_inspiral":
-	sngl_table = sim_to_sngl_table(lsctables.SimInspiralTable, lsctables.SnglInspiralTable)
+    sngl_table = sim_to_sngl_table(lsctables.SimInspiralTable, lsctables.SnglInspiralTable)
 elif opts.store_sngl == "sngl_burst":
-	sngl_table = sim_to_sngl_table(lsctables.SimBurstTable, lsctables.SnglBurstTable)
+    sngl_table = sim_to_sngl_table(lsctables.SimBurstTable, lsctables.SnglBurstTable)
 
 i = 0
 for row in sims:
-	i += 1
-	snr = {}
+    i += 1
+    snr = {}
 
-	if opts.sim_id is not None and opts.sim_id != int(row.simulation_id):
-		continue
+    if opts.sim_id is not None and opts.sim_id != int(row.simulation_id):
+        continue
 
-	for d, det in detectors.iteritems():
-		psd = detector_psds[d]
+    for d, det in detectors.iteritems():
+        psd = detector_psds[d]
 
-		# inspiral case
-		if type(row) == lalmetaio.SimInspiralTable:
-			time = row.geocent_end_time
-			hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
-			hp.epoch += time
-			hx.epoch += time
-			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
-				row.longitude, row.latitude, row.polarization, det )
-			ra, dec, psi = row.longitude, row.latitude, row.polarization
-			f_low_wave = max(opts.low_frequency_cutoff, row.f_lower)
-		# burst case
-		elif type(row) == lalmetaio.SimBurst:
-			time = row.time_geocent_gps
-			hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
-			hp.epoch += time
-			hx.epoch += time
-			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
-				row.ra, row.dec, row.psi, det )
-			ra, dec, psi = row.ra, row.dec, row.psi
-			# FIXME: What's the f_lower for a burst? central_freq - 2*band?
-			# more over, that might not make sense for things like cosmic 
-			# strings
-			f_low_wave = max(opts.low_frequency_cutoff, 0)
-		else:
-			raise TypeError("%s: It's not a burst, and it's not an inspiral... what do you want me to do here?" % type(row))
+        # inspiral case
+        if type(row) == lalmetaio.SimInspiralTable:
+            time = row.geocent_end_time
+            hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
+            hp.epoch += time
+            hx.epoch += time
+            h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
+                    row.longitude, row.latitude, row.polarization, det )
+            ra, dec, psi = row.longitude, row.latitude, row.polarization
+            f_low_wave = max(opts.low_frequency_cutoff, row.f_lower)
+        # burst case
+        elif type(row) == lalmetaio.SimBurst:
+            time = row.time_geocent_gps
+            hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
+            hp.epoch += time
+            hx.epoch += time
+            h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
+                    row.ra, row.dec, row.psi, det )
+            ra, dec, psi = row.ra, row.dec, row.psi
+            # FIXME: What's the f_lower for a burst? central_freq - 2*band?
+            # more over, that might not make sense for things like cosmic
+            # strings
+            f_low_wave = max(opts.low_frequency_cutoff, 0)
+        else:
+            raise TypeError("%s: It's not a burst, and it's not an inspiral... what do you want me to do here?" % type(row))
 
-		# zero pad
-		needed_samps = int(2.0*fnyq/deltaF)
-		prevlen = h.data.length
-		if h.data.length < needed_samps:
-			h = lal.ResizeREAL8TimeSeries( h, 0, needed_samps )
-		elif h.data.length > needed_samps:
-			h = lal.ResizeREAL8TimeSeries( h, h.data.length-needed_samps, needed_samps )
-		
-		# Forward FFT
-		# adjust heterodyne frequency to match flow
-		hf = lal.CreateCOMPLEX16FrequencySeries(
-			name = "FD signal",
-			epoch = h.epoch,
-			f0 = 0,
-			deltaF = deltaF,
-			sampleUnits = lal.lalDimensionlessUnit,
-			length = h.data.length/2 + 1
-		)
+        # zero pad
+        needed_samps = int(2.0*fnyq/deltaF)
+        prevlen = h.data.length
+        if h.data.length < needed_samps:
+            h = lal.ResizeREAL8TimeSeries( h, 0, needed_samps )
+        elif h.data.length > needed_samps:
+            h = lal.ResizeREAL8TimeSeries( h, h.data.length-needed_samps, needed_samps )
 
-		lal.REAL8TimeFreqFFT( hf, h, fwdplan )
-		injection_waveforms[d] = hf
+        # Forward FFT
+        # adjust heterodyne frequency to match flow
+        hf = lal.CreateCOMPLEX16FrequencySeries(
+                name = "FD signal",
+                epoch = h.epoch,
+                f0 = 0,
+                deltaF = deltaF,
+                sampleUnits = lal.lalDimensionlessUnit,
+                length = h.data.length/2 + 1
+        )
 
-		snr[d] = hoff_single_ifo_snr(hf, psd, f_low_wave, min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency))
-		if opts.machine_parse and not opts.no_print_single_ifo:
-			print snr[d]
-		elif not opts.no_print_single_ifo:
-			print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
-		if opts.store_sngl == "sngl_inspiral":
-			sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
-			sngl_row.snr = snr[d]
-			sngl_row.event_id = sngl_table.get_next_id()
-		elif opts.store_sngl == "sngl_burst":
-			sngl_row = sim_to_sngl_burst(row, det.frDetector.prefix, sngl_table)
-			sngl_row.snr = snr[d]
-			sngl_row.event_id = sngl_table.get_next_id()
+        lal.REAL8TimeFreqFFT( hf, h, fwdplan )
+        injection_waveforms[d] = hf
 
-	net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
-	if opts.machine_parse and not opts.no_print_network:
-		print "%f" % net_snr
-	elif not opts.no_print_network:
-		print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
+        snr[d] = hoff_single_ifo_snr(hf, psd, f_low_wave, min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency))
+        if opts.machine_parse and not opts.no_print_single_ifo:
+            print snr[d]
+        elif not opts.no_print_single_ifo:
+            print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
+        if opts.store_sngl == "sngl_inspiral":
+            sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
+            sngl_row.snr = snr[d]
+            sngl_row.event_id = sngl_table.get_next_id()
+        elif opts.store_sngl == "sngl_burst":
+            sngl_row = sim_to_sngl_burst(row, det.frDetector.prefix, sngl_table)
+            sngl_row.snr = snr[d]
+            sngl_row.event_id = sngl_table.get_next_id()
 
-	#
-	# Coherent SNR
-	#
-	time_delays = {}
-	responses = {}
-	d0 = "H1"
-	for d in detectors.keys():
-		time_delays[(d0,d)] = antenna.timeDelay( float(time), ra, dec, 'radians', d0, d )
-	responses = {}
-	# TODO: move this up to the PSD section, since it's only a function of frequency
-	S_f_coh = numpy.zeros( (2, len(f)) )
-	hp_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
-	hx_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
-	hp_coh_det = {}
-	hx_coh_det = {}
-	for d in detectors.keys():
-		responses[d] = antenna.response( float(time), ra, dec, 0, psi, 'radians', d )[:2]
-		# Creighton and Anderson eq. 7.137
-		S_f_coh += numpy.array([ numpy.conj(r)*r/detector_psds[d] for r in responses[d] ])
+    net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
+    if opts.machine_parse and not opts.no_print_network:
+        print "%f" % net_snr
+    elif not opts.no_print_network:
+        print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
 
-		# Creighton and Anderson eq. 7.136a (numerator)
-		hp_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][0] / detector_psds[d]
-		hp_coh += hp_coh_det[d]
-		# Creighton and Anderson eq. 7.136b (numerator)
-		hx_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][1] / detector_psds[d]
-		hx_coh += hx_coh_det[d]
-		df = injection_waveforms[d].deltaF
+    #
+    # Coherent SNR
+    #
+    time_delays = {}
+    responses = {}
+    d0 = "H1"
+    for d in detectors.keys():
+        time_delays[(d0,d)] = antenna.timeDelay( float(time), ra, dec, 'radians', d0, d )
+    responses = {}
+    # TODO: move this up to the PSD section, since it's only a function of frequency
+    S_f_coh = numpy.zeros( (2, len(f)) )
+    hp_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
+    hx_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
+    hp_coh_det = {}
+    hx_coh_det = {}
+    for d in detectors.keys():
+        responses[d] = antenna.response( float(time), ra, dec, 0, psi, 'radians', d )[:2]
+        # Creighton and Anderson eq. 7.137
+        S_f_coh += numpy.array([ numpy.conj(r)*r/detector_psds[d] for r in responses[d] ])
 
-	# Creighton and Anderson eq. 7.136a,b (full)
-	hp_coh_f = hp_coh / S_f_coh[0]
-	hx_coh_f = hx_coh / S_f_coh[1]
+        # Creighton and Anderson eq. 7.136a (numerator)
+        hp_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][0] / detector_psds[d]
+        hp_coh += hp_coh_det[d]
+        # Creighton and Anderson eq. 7.136b (numerator)
+        hx_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][1] / detector_psds[d]
+        hx_coh += hx_coh_det[d]
+        df = injection_waveforms[d].deltaF
+
+    # Creighton and Anderson eq. 7.136a,b (full)
+    hp_coh_f = hp_coh / S_f_coh[0]
+    hx_coh_f = hx_coh / S_f_coh[1]
 
 
-	# Creighton and Anderson eq. 7.138
-	coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
-	coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
-	if opts.machine_parse and not opts.no_print_coherent:
-		print "%g" % numpy.sqrt(coh_snr)
-	elif not opts.no_print_coherent:
-		print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
+    # Creighton and Anderson eq. 7.138
+    coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
+    coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
+    if opts.machine_parse and not opts.no_print_coherent:
+        print "%g" % numpy.sqrt(coh_snr)
+    elif not opts.no_print_coherent:
+        print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
 
-	coh_energy = 0
-	coh_energy_mat = {}
-	for ((d1, hf_d1), (d2, hf_d2)) in itertools.combinations( tuple(hp_coh_det.iteritems()), 2 ):
-		coh_energy_mat[(d1,d2)] = sum(hf_d1.conj() * hf_d2 / S_f_coh[0])*df
-		coh_energy += coh_energy_mat[(d1,d2)]
+    coh_energy = 0
+    coh_energy_mat = {}
+    for ((d1, hf_d1), (d2, hf_d2)) in itertools.combinations( tuple(hp_coh_det.iteritems()), 2 ):
+        coh_energy_mat[(d1,d2)] = sum(hf_d1.conj() * hf_d2 / S_f_coh[0])*df
+        coh_energy += coh_energy_mat[(d1,d2)]
 
-	eta_est = numpy.sqrt(abs(coh_energy)/len(detectors.values()))
-	if opts.machine_parse and not opts.no_print_cwb:
-		print "%g" % eta_est
-	elif not opts.no_print_cwb:
-		print "Estimated cWB ranking statistic (1G) %g" % eta_est
+    eta_est = numpy.sqrt(abs(coh_energy)/len(detectors.values()))
+    if opts.machine_parse and not opts.no_print_cwb:
+        print "%g" % eta_est
+    elif not opts.no_print_cwb:
+        print "Estimated cWB ranking statistic (1G) %g" % eta_est
 
-	if opts.single_snr_cut_thresh is not None and any(map(lambda s: s < opts.single_snr_cut_thresh, snr.values())):
-		cut_sims.append( (type(row), row.simulation_id ) )
-		continue
-	if opts.coherent_snr_cut_thresh is not None and coherent_snr < opts.coherent_snr_cut_thresh:
-		cut_sims.append( (type(row), row.simulation_id ) )
-		continue
-	if opts.coherent_amplitude_cut_thresh is not None and eta_est < opts.coherent_amplitude_cut_thresh:
-		cut_sims.append( (type(row), row.simulation_id ) )
-		continue
+    if opts.single_snr_cut_thresh is not None and any(map(lambda s: s < opts.single_snr_cut_thresh, snr.values())):
+        cut_sims.append( (type(row), row.simulation_id ) )
+        continue
+    if opts.coherent_snr_cut_thresh is not None and coherent_snr < opts.coherent_snr_cut_thresh:
+        cut_sims.append( (type(row), row.simulation_id ) )
+        continue
+    if opts.coherent_amplitude_cut_thresh is not None and eta_est < opts.coherent_amplitude_cut_thresh:
+        cut_sims.append( (type(row), row.simulation_id ) )
+        continue
 
-	# TODO: Use different ranking statistic for efficiency
-	if net_snr > snr_thresh:
-		efficiencies[row.waveform].append( row )
+    # TODO: Use different ranking statistic for efficiency
+    if net_snr > snr_thresh:
+        efficiencies[row.waveform].append( row )
 
-	injected[row.waveform].append( row )
-	count[row.waveform] += 1
+    injected[row.waveform].append( row )
+    count[row.waveform] += 1
 
 try:
-	sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
-	sb_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimBurst, cut_sims))
-	print "%d burst injections would be cut from SNR thresholds." % len(sb_ids)
-	n = len(sim_burst)-1
-	for i, sb in enumerate(sim_burst[::-1]):
-		if int(sb.simulation_id) in sb_ids:
-			del sim_burst[n-i]
+    sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
+    sb_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimBurst, cut_sims))
+    print "%d burst injections would be cut from SNR thresholds." % len(sb_ids)
+    n = len(sim_burst)-1
+    for i, sb in enumerate(sim_burst[::-1]):
+        if int(sb.simulation_id) in sb_ids:
+            del sim_burst[n-i]
 except ValueError:
-	pass
+    pass
 try:
-	sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
-	si_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimInspiralTable, cut_sims))
-	print "%d inspiral injections would be cut from SNR thresholds." % len(si_ids)
-	n = len(sim_insp)-1
-	for i, si in enumerate(sim_insp[::-1]):
-		if int(si.simulation_id) in si_ids:
-			del sim_insp[n-i]
+    sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
+    si_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimInspiralTable, cut_sims))
+    print "%d inspiral injections would be cut from SNR thresholds." % len(si_ids)
+    n = len(sim_insp)-1
+    for i, si in enumerate(sim_insp[::-1]):
+        if int(si.simulation_id) in si_ids:
+            del sim_insp[n-i]
 except ValueError:
-	pass
+    pass
 
 if opts.store_sngl is not None:
-	xmldoc = ligolw.Document()
-	xmldoc.childNodes.append(ligolw.LIGO_LW())
-	xmldoc.childNodes[0].appendChild(sngl_table)
-	process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
-	ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
-	utils.write_filename(xmldoc, "%s-FAKE_SEARCH.xml.gz" % ifos, gz=True)
+    xmldoc = ligolw.Document()
+    xmldoc.childNodes.append(ligolw.LIGO_LW())
+    xmldoc.childNodes[0].appendChild(sngl_table)
+    process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
+    ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
+    utils.write_filename(xmldoc, "%s-FAKE_SEARCH.xml.gz" % ifos, gz=True)
 
 if opts.calculate_only:
     exit(0)
 
 if len(cut_sims) > 0:
-	print "Writing cut XML file."
-	utils.write_filename( xmldoc, "cut_tmp.xml" )
+    print "Writing cut XML file."
+    utils.write_filename( xmldoc, "cut_tmp.xml" )
 
 if opts.sim_id is not None:
     exit()
@@ -513,70 +513,70 @@ from pylal import imr_utils
 from pylal import rate
 
 for wave, eff in efficiencies.iteritems():
-	ndet = len(eff)
-	if opts.verbose:
-		print "Report for waveform family %s" % wave
-		print "Efficiency: %d / %d = %f" % (ndet, count[wave], float(ndet)/count[wave])
+    ndet = len(eff)
+    if opts.verbose:
+        print "Report for waveform family %s" % wave
+        print "Efficiency: %d / %d = %f" % (ndet, count[wave], float(ndet)/count[wave])
 
-	# Number of injections for this type
-	inj = injected[wave]
+    # Number of injections for this type
+    inj = injected[wave]
 
-	#
-	# Measure efficiency
-	#
-	effbins = imr_utils.guess_nd_bins( inj, {eff_attr: (opts.eff_bins, rate.LogarithmicBins)} )
-	eff, err = imr_utils.compute_search_efficiency_in_bins( eff, inj, effbins, lambda sim: (getattr(sim, eff_attr),) )
+    #
+    # Measure efficiency
+    #
+    effbins = imr_utils.guess_nd_bins( inj, {eff_attr: (opts.eff_bins, rate.LogarithmicBins)} )
+    eff, err = imr_utils.compute_search_efficiency_in_bins( eff, inj, effbins, lambda sim: (getattr(sim, eff_attr),) )
 
-	#
-	# Fit efficiency to loglogistic curve
-	#
-	cents = eff.centres()[0]
-	for c, ef, er in zip(eff.centres()[0], eff.array, err.array):
-		if opts.verbose:
-			print "%2.1g %2.1f +/- %0.2f" % (c, ef, er)
-	try:
-		attr_scale = numpy.average(map(lambda sim: getattr(sim, eff_attr), inj))
-		a, b = get_eff_params( cents, eff.array, attr_scale )
-	except RuntimeError:
-		print >>sys.stderr, "Warning, couldn't fit efficiency, check bins. Skipping..."
-		continue
-	ten, fifty, ninety = determine_10_50_90_eff( (a,b) )
-	if opts.verbose:
-		print "10%% / 50%% / 90%% efficiency estimate: %2.2g %2.2g %2.2g" % (ten, fifty, ninety)
+    #
+    # Fit efficiency to loglogistic curve
+    #
+    cents = eff.centres()[0]
+    for c, ef, er in zip(eff.centres()[0], eff.array, err.array):
+        if opts.verbose:
+            print "%2.1g %2.1f +/- %0.2f" % (c, ef, er)
+    try:
+        attr_scale = numpy.average(map(lambda sim: getattr(sim, eff_attr), inj))
+        a, b = get_eff_params( cents, eff.array, attr_scale )
+    except RuntimeError:
+        print >>sys.stderr, "Warning, couldn't fit efficiency, check bins. Skipping..."
+        continue
+    ten, fifty, ninety = determine_10_50_90_eff( (a,b) )
+    if opts.verbose:
+        print "10%% / 50%% / 90%% efficiency estimate: %2.2g %2.2g %2.2g" % (ten, fifty, ninety)
 
-	if opts.squeeze_attribute is not None:
-		#new_range = ( max(0, ninety - (ninety-ten)), ten + (ninety-ten) )
-		new_range = ( ninety, ten )
-		orig_range = []
-		for sim in (sim_insp or []) + (sim_burst or []):
-			if sim.waveform != wave:
-				continue
-			try:
-				orig_range.append( getattr( sim, opts.squeeze_attribute ) )
-			except:
-				# TODO: Warn?
-				pass
+    if opts.squeeze_attribute is not None:
+        #new_range = ( max(0, ninety - (ninety-ten)), ten + (ninety-ten) )
+        new_range = ( ninety, ten )
+        orig_range = []
+        for sim in (sim_insp or []) + (sim_burst or []):
+            if sim.waveform != wave:
+                continue
+            try:
+                orig_range.append( getattr( sim, opts.squeeze_attribute ) )
+            except:
+                # TODO: Warn?
+                pass
 
-		orig_range = sorted( orig_range )
-		orig_range = (orig_range[0], orig_range[-1])
-		if opts.verbose:
-			print "Squeeze distribution %s according to efficiency values. Will map %s -> %s" % (opts.squeeze_attribute, str(orig_range), str(new_range))
+        orig_range = sorted( orig_range )
+        orig_range = (orig_range[0], orig_range[-1])
+        if opts.verbose:
+            print "Squeeze distribution %s according to efficiency values. Will map %s -> %s" % (opts.squeeze_attribute, str(orig_range), str(new_range))
 
-		for sim in sim_burst:
-			if sim.waveform != wave: 
-				continue
-			try:
-				setattr( sim, opts.squeeze_attribute, rescale_number( getattr( sim, opts.squeeze_attribute ), orig_range, new_range ) )
-			except AttributeError:
-				# TODO: Warn?
-				pass
-		for sim in sim_insp:
-			if sim.waveform != wave: 
-				continue
-			try:
-				setattr( sim, opts.squeeze_attribute, rescale_number( getattr( sim, opts.squeeze_attribute ), orig_range, new_range ) )
-			except AttributeError:
-				# TODO: Warn?
-				pass
+        for sim in sim_burst:
+            if sim.waveform != wave:
+                continue
+            try:
+                setattr( sim, opts.squeeze_attribute, rescale_number( getattr( sim, opts.squeeze_attribute ), orig_range, new_range ) )
+            except AttributeError:
+                # TODO: Warn?
+                pass
+        for sim in sim_insp:
+            if sim.waveform != wave:
+                continue
+            try:
+                setattr( sim, opts.squeeze_attribute, rescale_number( getattr( sim, opts.squeeze_attribute ), orig_range, new_range ) )
+            except AttributeError:
+                # TODO: Warn?
+                pass
 
 utils.write_filename( xmldoc, "squeeze_tmp.xml" )
