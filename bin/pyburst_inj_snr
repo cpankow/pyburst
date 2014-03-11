@@ -99,9 +99,9 @@ def parse_psd_func( funcstr ):
 def sim_to_sngl_table(sim_type, table_type):
     column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
     if sim_type == lsctables.SimInspiralTable:
-        return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
+        return lsctables.New(table_type, column_over + ["search", "channel", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
     elif sim_type == lsctables.SimBurstTable:
-        return lsctables.New(table_type, column_over + ["search", "central_freq", "ifo", "event_id", "peak_time", "peak_time_ns", "snr"])
+        return lsctables.New(table_type, column_over + ["search", "channel", "central_freq", "ifo", "event_id", "start_time", "start_time_ns", "peak_time", "peak_time_ns", "snr"])
 
 def sim_to_sngl_insp(sim, ifo, sngl_table):
     """
@@ -120,6 +120,7 @@ def sim_to_sngl_insp(sim, ifo, sngl_table):
             getattr(sim, "%s_end_time_ns" % ifo[0].lower()) ) )
     sngl_row.ifo = ifo
     sngl_row.search = "fake"
+    sngl_row.channel = "fake"
     sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
     if isinstance(sim, lsctables.SimInspiral):
         sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
@@ -139,12 +140,19 @@ def sim_to_sngl_burst(sim, ifo, sngl_table):
         setattr(sngl_row, col, getattr(sim, col))
 
     sngl_row.set_peak(gluelal.LIGOTimeGPS( sim.time_geocent_gps.gpsSeconds, sim.time_geocent_gps.gpsNanoSeconds))
+    if sim.duration is not None:
+        # Likely BTLWNB
+        sngl_row.set_start(sngl_row.get_peak() - sim.duration/2.0)
+    else:
+        # Likely CSG
+        sngl_row.set_start(sngl_row.get_peak() - sim.q/(numpy.sqrt(2)*numpy.pi*sim.frequency)/2.0)
     if sim.bandwidth is not None:
         sngl_row.central_freq = sim.frequency + sim.bandwidth/2.0
     else:
         sngl_row.central_freq = sim.frequency
     sngl_row.ifo = ifo
     sngl_row.search = "fake"
+    sngl_row.channel = "fake"
     sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
     sngl_table.append(sngl_row)
     return sngl_row
@@ -391,7 +399,7 @@ for row in sims:
             sngl_row.event_id = sngl_table.get_next_id()
         elif opts.store_sngl == "sngl_burst":
             sngl_row = sim_to_sngl_burst(row, det.frDetector.prefix, sngl_table)
-            sngl_row.snr = snr[d]
+            sngl_row.snr = snr[d]**2 # SNR column is energy, really
             sngl_row.event_id = sngl_table.get_next_id()
 
     net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
