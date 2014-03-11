@@ -313,7 +313,10 @@ for row in sims:
 			f_low_wave = max(opts.low_frequency_cutoff, row.f_lower)
 		# burst case
 		elif type(row) == lalmetaio.SimBurst:
+			time = row.time_geocent_gps
 			hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
+			hp.epoch += time
+			hx.epoch += time
 			h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
 				row.ra, row.dec, row.psi, det )
 			ra, dec, psi = row.ra, row.dec, row.psi
