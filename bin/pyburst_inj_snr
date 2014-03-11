@@ -98,9 +98,15 @@ def parse_psd_func( funcstr ):
 
 def sim_to_sngl_table(sim_type, table_type):
 	column_over = list(set(table_type.validcolumns) & set(sim_type.validcolumns))
-	return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
+	if sim_type == lsctables.SimInspiralTable:
+		return lsctables.New(table_type, column_over + ["search", "eff_distance", "ifo", "event_id", "end_time", "end_time_ns", "snr"])
+	elif sim_type == lsctables.SimBurstTable:
+		return lsctables.New(table_type, column_over + ["search", "central_freq", "ifo", "event_id", "peak_time", "peak_time_ns", "snr"])
 
 def sim_to_sngl_insp(sim, ifo, sngl_table):
+	"""
+	Take the information in sim and transfer overlapping information to a SnglInspiral row, thus appended to sngl_table.
+	"""
 	if "SimInspiral" in str(sim): # Don't ask
 		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
 	else:
@@ -115,10 +121,33 @@ def sim_to_sngl_insp(sim, ifo, sngl_table):
 	sngl_row.ifo = ifo
 	sngl_row.search = "fake"
 	sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
-	sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
+	if isinstance(sim, lsctables.SimInspiral):
+		sngl_row.eff_distance = getattr(row, "eff_dist_%s" % ifo[0].lower())
 	sngl_table.append(sngl_row)
 	return sngl_row
 
+def sim_to_sngl_burst(sim, ifo, sngl_table):
+	"""
+	Take the information in sim and transfer overlapping information to a SnglBurst row, thus appended to sngl_table.
+	"""
+	if "SimInspiral" in str(sim): # Don't ask
+		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimInspiralTable.validcolumns))
+	else:
+		column_over = list(set(sngl_table.validcolumns) & set(lsctables.SimBurstTable.validcolumns))
+	sngl_row = sngl_table.RowType()
+	for col in column_over:
+		setattr(sngl_row, col, getattr(sim, col))
+
+	sngl_row.set_peak(gluelal.LIGOTimeGPS( sim.time_geocent_gps.gpsSeconds, sim.time_geocent_gps.gpsNanoSeconds))
+	if sim.bandwidth is not None:
+		sngl_row.central_freq = sim.frequency + sim.bandwidth/2.0
+	else:
+		sngl_row.central_freq = sim.frequency
+	sngl_row.ifo = ifo
+	sngl_row.search = "fake"
+	sngl_row.process_id = ilwd.ilwdchar("process:process_id:0")
+	sngl_table.append(sngl_row)
+	return sngl_row
 
 def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
 	"""
@@ -203,7 +232,7 @@ optp.add_option("--verbose", action="store_true", help="Be verbose.")
 optp.add_option("--single-snr-cut-thresh", type=float, help="Cut any injection with a single detector SNR less than this.")
 optp.add_option("--coherent-snr-cut-thresh", type=float, help="Cut any injection with a coherent SNR less than this.")
 optp.add_option("--coherent-amplitude-cut-thresh", type=float, help="Cut any injection with a cWB coherent ampltiude (eta) less than this.")
-optp.add_option("--store-sngl", help="Store the values of the simulated event and SNR calculation in an sngl_* event row. Valid choices are sngl_inspiral.")
+optp.add_option("--store-sngl", help="Store the values of the simulated event and SNR calculation in an sngl_* event row. Valid choices are sngl_inspiral, sngl_burst.")
 optp.add_option("--squeeze-attribute", default="hrss", help="Squeeze this attribute for injections so as to make the more detectable. Default is 'hrss'. You might try 'distance' for SimInspirals.")
 optp.add_option("--sim-id", type=int, help="Only calculate for simulation_id N")
 
@@ -286,9 +315,11 @@ injection_waveforms = {}
 # Store sims to cut
 cut_sims = []
 
-# Store realized SNRs in SnglInspiral rows
+# Store realized SNRs in Sngl* rows
 if opts.store_sngl == "sngl_inspiral":
 	sngl_table = sim_to_sngl_table(lsctables.SimInspiralTable, lsctables.SnglInspiralTable)
+elif opts.store_sngl == "sngl_burst":
+	sngl_table = sim_to_sngl_table(lsctables.SimBurstTable, lsctables.SnglBurstTable)
 
 i = 0
 for row in sims:
@@ -356,6 +387,10 @@ for row in sims:
 			print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
 		if opts.store_sngl == "sngl_inspiral":
 			sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
+			sngl_row.snr = snr[d]
+			sngl_row.event_id = sngl_table.get_next_id()
+		elif opts.store_sngl == "sngl_burst":
+			sngl_row = sim_to_sngl_burst(row, det.frDetector.prefix, sngl_table)
 			sngl_row.snr = snr[d]
 			sngl_row.event_id = sngl_table.get_next_id()
 
@@ -456,7 +491,7 @@ try:
 except ValueError:
 	pass
 
-if opts.store_sngl == "sngl_inspiral":
+if opts.store_sngl is not None:
 	xmldoc = ligolw.Document()
 	xmldoc.childNodes.append(ligolw.LIGO_LW())
 	xmldoc.childNodes[0].appendChild(sngl_table)
