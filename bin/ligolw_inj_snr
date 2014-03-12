@@ -554,7 +554,7 @@ for wave, eff in efficiencies.iteritems():
 
     if opts.squeeze_attribute is not None:
         #new_range = ( max(0, ninety - (ninety-ten)), ten + (ninety-ten) )
-        new_range = ( ninety, ten )
+        new_range = ( ten, ninety )
         orig_range = []
         for sim in (sim_insp or []) + (sim_burst or []):
             if sim.waveform != wave:
