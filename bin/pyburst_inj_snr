@@ -15,8 +15,8 @@ from glue import lal as gluelal
 from glue.ligolw.utils import process
 
 from pylal import antenna
-from pylal import coherent_inspiral_metric as metric
-from pylal import coherent_inspiral_metric_detector_details as details
+#from pylal import coherent_inspiral_metric as metric
+#from pylal import coherent_inspiral_metric_detector_details as details
 from pylal.series import read_psd_xmldoc
 
 import lal
@@ -407,7 +407,7 @@ for row in sims:
 
     net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
     if opts.store_sim:
-        row.amplitude = new_snr**2
+        row.amplitude = net_snr**2
         sim_snr_table.append(row)
 
     if opts.machine_parse and not opts.no_print_network:
