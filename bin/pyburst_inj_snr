@@ -44,6 +44,33 @@ def copy_sim_inspiral( row ):
     swigrow.geocent_end_time.gpsNanoSeconds = row.geocent_end_time_ns
     return swigrow
 
+def copy_sim_burst_swig( swigrow, table ):
+    """
+    Turn a SWIG wrapped lalburst.SimBurst into a lsctables.SimBurst
+    """
+
+    row = table.RowType()
+    row.hrss = swigrow.hrss
+    row.time_geocent_gps = gluelal.LIGOTimeGPS(float(swigrow.time_geocent_gps))
+    row.psi = swigrow.psi
+    row.amplitude = swigrow.amplitude or 0
+    row.egw_over_rsquared = swigrow.egw_over_rsquared or 0
+    row.waveform_number = swigrow.waveform_number or 0
+    row.pol_ellipse_angle = swigrow.pol_ellipse_angle or 0.0
+    row.simulation_id = ilwd.ilwdchar("sim_burst:sim_burst_id:%d" % swigrow.simulation_id)
+    row.q = swigrow.q
+    row.waveform = swigrow.waveform
+    row.bandwidth = swigrow.bandwidth
+    row.process_id = ilwd.ilwdchar("process:process_id:%d" % swigrow.process_id)
+    row.frequency = swigrow.frequency
+    row.ra = swigrow.ra
+    row.time_geocent_gmst = swigrow.time_geocent_gmst
+    row.pol_ellipse_e = swigrow.pol_ellipse_e
+    row.duration = swigrow.duration
+    row.dec = swigrow.dec
+
+    return row
+
 def copy_sim_burst( row ):
     """
     Turn a lsctables.SimBurst into a SWIG wrapped lalburst.SimBurst
@@ -514,7 +541,7 @@ if opts.store_sngl is not None or opts.store_sim:
         ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
 
     if opts.store_sim:
-        xmldoc.childNodes[0].appendChild(sim_snr_table)
+        xmldoc.childNodes[0].appendChild(map(copy_sim_row_swig, sim_snr_table))
         ifos = reduce(str.__add__, [ifo[0] for ifo in detector_psds.keys()])
 
     process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
