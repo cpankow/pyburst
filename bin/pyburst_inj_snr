@@ -51,7 +51,8 @@ def copy_sim_burst_swig( swigrow, table ):
 
     row = table.RowType()
     row.hrss = swigrow.hrss
-    row.time_geocent_gps = gluelal.LIGOTimeGPS(float(swigrow.time_geocent_gps))
+    row.time_geocent_gps = gluelal.LIGOTimeGPS(float(swigrow.time_geocent_gps)).seconds
+    row.time_geocent_gps_ns = gluelal.LIGOTimeGPS(float(swigrow.time_geocent_gps)).nanoseconds
     row.psi = swigrow.psi
     row.amplitude = swigrow.amplitude or 0
     row.egw_over_rsquared = swigrow.egw_over_rsquared or 0
@@ -62,6 +63,7 @@ def copy_sim_burst_swig( swigrow, table ):
     row.waveform = swigrow.waveform
     row.bandwidth = swigrow.bandwidth
     row.process_id = ilwd.ilwdchar("process:process_id:%d" % swigrow.process_id)
+    row.time_slide_id = ilwd.ilwdchar("time_slide:time_slide_id:0")
     row.frequency = swigrow.frequency
     row.ra = swigrow.ra
     row.time_geocent_gmst = swigrow.time_geocent_gmst
@@ -541,7 +543,9 @@ if opts.store_sngl is not None or opts.store_sim:
         ifos = reduce(str.__add__, [ifo[0] for ifo in detectors.keys()])
 
     if opts.store_sim:
-        xmldoc.childNodes[0].appendChild(map(copy_sim_row_swig, sim_snr_table))
+        for i, row in enumerate(sim_snr_table):
+            sim_snr_table[i] = copy_sim_burst_swig(row, sim_snr_table)
+        xmldoc.childNodes[0].appendChild(sim_snr_table)
         ifos = reduce(str.__add__, [ifo[0] for ifo in detector_psds.keys()])
 
     process.register_to_xmldoc(xmldoc, sys.argv[0], opts.__dict__)
