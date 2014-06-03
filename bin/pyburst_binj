@@ -110,6 +110,7 @@ def uniform_interval(interval, num):
     # http://docs.scipy.org/doc/numpy/reference/generated/numpy.random.random_sample.html#numpy.random.random_sample
     return (interval[1] - interval[0]) * random.random_sample(num) + interval[0]
 
+# FIXME: Make different injection sources subclass this
 class source(object):
     def __init__(self, waveform, rate, tstart, tstop, **kwargs):
         self.waveform = waveform
@@ -126,6 +127,8 @@ class source(object):
             self.d_range = kwargs["duration"]
             self.f_range = kwargs["frequency"]
             self.egw_range = kwargs["egw"]
+        elif waveform == "Impulse":
+            self.h_range = kwargs["hrss"]
         else:
             raise ValueError("Unknown waveform family %s." % waveform)
 
@@ -143,6 +146,15 @@ class source(object):
     def log_egw(self):
         log10e = segment(numpy.log10(self.egw_range[0]), numpy.log10(self.egw_range[1]))
         return 10**uniform_interval( log10e, self.expnum )
+
+    def draw_imp_params(self):
+        h = []
+        if type(self.h_range) == segment:
+            h = self.log_hrss()
+        else:
+            h = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum) )
+
+        return h
 
     def draw_sg_params(self):
         h, q, f = [], [], []
@@ -209,7 +221,7 @@ parser = OptionParser(description = __doc__)
 general_section = OptionGroup(parser, "General", "This group controls the general behavior of injections, such as their GPS timing and other common variables.")
 general_section.add_option("--gps-start-time", metavar = "seconds", type = "int", help = "Set the start time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
 general_section.add_option("--gps-end-time", metavar = "seconds", type = "int", help = "Set the end time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
-general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, StringCusp, and BTLWNB.")
+general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, StringCusp, BTLWNB, and Impulse.")
 general_section.add_option("--output", metavar = "filename", help = "Set the name of the LIGO light-weight XML file to output")
 general_section.add_option("--seed", metavar = "int", type = "int", default = 1, help = "set the random seed default = 1")
 general_section.add_option("--time-slide-id", metavar= "int", type = "int", default = 0, help = "Use the time slide id, default is 0.")
@@ -235,7 +247,7 @@ sg_section.add_option("--sg-polarization-type", metavar = "type", default='ellip
 parser.add_option_group(sg_section)
 
 wnb_section = OptionGroup(parser, "Band and time limited white noise burst (BTLWNB) options", "This group controls the distribution of BTLWNB injections.")
-general_section.add_option("--wnb-max-dist", metavar = "Mpc", default = 1.0, type = "float", help = "Maximum distance for which to produce WNB in Mpc, default is 1.")
+wnb_section.add_option("--wnb-max-dist", metavar = "Mpc", default = 1.0, type = "float", help = "Maximum distance for which to produce WNB in Mpc, default is 1.")
 wnb_section.add_option("--wnb-fix-egw", metavar = "M_s", type = "float", action="append", help = "Fix the energy (in solar masses with c=1) value of the BTLWNB injections. Give several times with different values to build up an array of energies to choose from. Overrides min and max options.")
 wnb_section.add_option("--wnb-min-egw", metavar = "M_s", type = "float", help = "Fix the min energy value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-max-egw", metavar = "M_s", type = "float", help = "Fix the max energy value of the BTLWNB injections.")
@@ -249,6 +261,12 @@ wnb_section.add_option("--wnb-fix-frequency", metavar = "Hz", type = "float", ac
 wnb_section.add_option("--wnb-min-frequency", metavar = "Hz", type = "float", help = "Fix the min central frequency value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-max-frequency", metavar = "Hz", type = "float", help = "Fix the max central frequency value of the BTLWNB injections.")
 parser.add_option_group(wnb_section)
+
+imp_section = OptionGroup(parser, "Impulse options", "This group controls the distribution of Impulse injections.")
+imp_section.add_option("--imp-fix-hrss", metavar = "strain", type = "float", action="append", help = "Fix the hrss value of the Impulse injections. Give several times with different values to build up an array of hrss to choose from. Overrides min and max options.")
+imp_section.add_option("--imp-min-hrss", metavar = "strain", type = "float", help = "Fix the min hrss value of the Impulse injections.")
+imp_section.add_option("--imp-max-hrss", metavar = "strain", type = "float", help = "Fix the max hrss value of the Impulse injections.")
+parser.add_option_group(imp_section)
 
 #
 # Parse options
@@ -300,6 +318,17 @@ for srcname in options.burst_family:
 
         srcs.append( source(srcname, options.event_rate, start, stop, q=q_values, frequency=f_values, hrss=h_values) )
 
+    elif srcname == "Impulse":
+        if options.imp_min_hrss is not None and options.imp_max_hrss is not None:
+            h_values = segment(options.imp_min_hrss, options.imp_max_hrss)
+        else:
+            if options.imp_fix_hrss is not None:
+                h_values = options.imp_fix_hrss
+            else:
+                raise ValueError("Current options do not constrain Impulse hrss values.")
+
+        srcs.append(source(srcname, options.event_rate, start, stop, hrss=h_values))
+
     elif srcname == "BTLWNB":
         if options.wnb_min_duration is not None and options.wnb_max_duration is not None:
             d_values = segment(options.wnb_min_duration, options.wnb_max_duration)
@@ -347,7 +376,9 @@ for src in srcs:
 
     if src.waveform == "SineGaussian":
         q, f, hrss = src.draw_sg_params()
-    if src.waveform == "BTLWNB":
+    elif src.waveform == "Impulse":
+        hrss = src.draw_imp_params()
+    elif src.waveform == "BTLWNB":
         band, dur, f, egw = src.draw_wnb_params()
         dist = src.volume_distributed_distances()
 
@@ -378,7 +409,6 @@ for src in srcs:
         row.process_id = procrow.process_id
         row.time_slide_id = ilwd.ilwdchar("time_slide:time_slide_id:%d" % options.time_slide_id)
 
-        # masses
         if row.waveform == "SineGaussian":
             row.q = q[i]
             row.frequency = f[i]
@@ -391,6 +421,9 @@ for src in srcs:
             elif options.sg_polarization_type == "elliptical":
                 row.pol_ellipse_e = uniform_interval((0,1),1)[0]
                 row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
+            row.hrss = hrss[i]
+
+        if row.waveform == "Impulse":
             row.hrss = hrss[i]
 
         elif row.waveform == "BTLWNB":
