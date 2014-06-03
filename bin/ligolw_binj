@@ -120,6 +120,11 @@ class source(object):
             self.q_range = kwargs["q"]
             self.f_range = kwargs["frequency"]
             self.h_range = kwargs["hrss"]
+        elif waveform == "StringCusp":
+            if not kwargs.has_key("frequency") or not kwargs.has_key("hrss"):
+                raise ValueError("StringCusp distribution requires a range of amplitude and f.")
+            self.f_range = kwargs["frequency"]
+            self.h_range = kwargs["hrss"]
         elif waveform == "BTLWNB":
             if not kwargs.has_key("duration") or not kwargs.has_key("bandwidth") or not kwargs.has_key("frequency"):
                 raise ValueError("BTLWNB distribution requires a range of frequency, bandwidth, and duration.")
@@ -128,6 +133,8 @@ class source(object):
             self.f_range = kwargs["frequency"]
             self.egw_range = kwargs["egw"]
         elif waveform == "Impulse":
+            if not kwargs.has_key("hrss"):
+                raise ValueError("Impulse distribution requires a range of amplitude.")
             self.h_range = kwargs["hrss"]
         else:
             raise ValueError("Unknown waveform family %s." % waveform)
@@ -174,6 +181,32 @@ class source(object):
             f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum) )
 
         return q, f, h
+
+    def draw_cusp_params(self):
+        a, f = [], []
+
+        if type(self.h_range) == segment:
+            a = self.log_hrss()
+        else:
+            a = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum) )
+
+        # Translated from the binj.c source random_string_cusp_fhigh function
+        #
+        # \theta is the angle the line of sight makes with the cusp.  \theta^{2}
+        # is distributed uniformly, and the high frequency cut-off of the
+        # injection is \propto \theta^{-3}.  So we first solve for the limits of
+        # \theta^{2} from the low- and high bounds of the frequency band of
+        # interest, pick a uniformly-distributed number in that range, and 
+        # convert back to a high frequency cut-off.
+        #
+        if type(self.f_range) == segment:
+            thetasqmin, thetasqmax = self.f_range[0]**(-2.0/3.0), self.f_range[1]**(-2.0/3.0)
+            f = uniform_interval((thetasqmin, thetasqmax), self.expnum)
+            f = f**(-3.0/2.0)
+        else:
+            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum) )
+
+        return a, f
 
     def draw_wnb_params(self):
         b, d, f, e = [], [], [], []
@@ -268,6 +301,15 @@ imp_section.add_option("--imp-min-hrss", metavar = "strain", type = "float", hel
 imp_section.add_option("--imp-max-hrss", metavar = "strain", type = "float", help = "Fix the max hrss value of the Impulse injections.")
 parser.add_option_group(imp_section)
 
+cusp_section = OptionGroup(parser, "StringCusp options", "This group controls the distribution of StringCusp injections.")
+cusp_section.add_option("--cusp-fix-frequency", metavar = "Hz", type = "float", action="append", help = "Fix the central frequency value of the BTLWNB injections. Give several times with different values to build up an array of frequencies to choose from. Overrides min and max options.")
+cusp_section.add_option("--cusp-min-frequency", metavar = "Hz", type = "float", help = "Fix the min central frequency value of the BTLWNB injections.")
+cusp_section.add_option("--cusp-max-frequency", metavar = "Hz", type = "float", help = "Fix the max central frequency value of the BTLWNB injections.")
+cusp_section.add_option("--cusp-fix-amplitude", metavar = "amp", type = "float", action="append", help = "Fix the amplitude value of the StringCusp injections. Give several times with different values to build up an array of amplitude to choose from. Overrides min and max options.")
+cusp_section.add_option("--cusp-min-amplitude", metavar = "amp", type = "float", help = "Fix the min amplitude value of the StringCusp injections.")
+cusp_section.add_option("--cusp-max-amplitude", metavar = "amp", type = "float", help = "Fix the max amplitude value of the StringCusp injections.")
+parser.add_option_group(cusp_section)
+
 #
 # Parse options
 #
@@ -317,6 +359,25 @@ for srcname in options.burst_family:
                 raise ValueError("Current options do not constrain SG hrss values.")
 
         srcs.append( source(srcname, options.event_rate, start, stop, q=q_values, frequency=f_values, hrss=h_values) )
+
+    if srcname == "StringCusp":
+        if options.cusp_min_frequency is not None and options.cusp_max_frequency is not None:
+            f_values = segment(options.cusp_min_frequency, options.cusp_max_frequency)
+        else:
+            if options.cusp_fix_frequency is not None:
+                f_values = options.cusp_fix_frequency
+            else:
+                raise ValueError("Current options do not constrain cusp frequency values.")
+
+        if options.cusp_min_amplitude is not None and options.cusp_max_amplitude is not None:
+            h_values = segment(options.cusp_min_amplitude, options.cusp_max_amplitude)
+        else:
+            if options.cusp_fix_amplitude is not None:
+                h_values = options.cusp_fix_amplitude
+            else:
+                raise ValueError("Current options do not constrain SG amplitude values.")
+
+        srcs.append( source(srcname, options.event_rate, start, stop, frequency=f_values, hrss=h_values) )
 
     elif srcname == "Impulse":
         if options.imp_min_hrss is not None and options.imp_max_hrss is not None:
@@ -376,6 +437,8 @@ for src in srcs:
 
     if src.waveform == "SineGaussian":
         q, f, hrss = src.draw_sg_params()
+    if src.waveform == "StringCusp":
+        amp, f = src.draw_cusp_params()
     elif src.waveform == "Impulse":
         hrss = src.draw_imp_params()
     elif src.waveform == "BTLWNB":
@@ -423,7 +486,14 @@ for src in srcs:
                 row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
             row.hrss = hrss[i]
 
-        if row.waveform == "Impulse":
+        elif row.waveform == "StringCusp":
+            row.frequency = f[i]
+            row.amplitude = amp[i]
+            # These are ignored, but for sake of completeness (as in lalapps_binj)
+            row.pol_ellipse_e = 1.0
+            row.pol_ellipse_angle = 0.0
+
+        elif row.waveform == "Impulse":
             row.hrss = hrss[i]
 
         elif row.waveform == "BTLWNB":
