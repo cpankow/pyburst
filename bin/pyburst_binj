@@ -39,6 +39,12 @@ import lalsimulation
 header = "#\tGravEn_SimID\tSimHrss\tSimEgwR2\tGravEn_Ampl\tInternal_x\tInternal_phi\tExternal_x\tExternal_phi\tExternal_psi\tFrameGPS\tEarthCtrGPS\tSimName\tSimHpHp\tSimHcHc\tSimHpHc\tGEO\tGEOctrGPS\tGEOfPlus\tGEOfCross\tGEOtErr\tGEOcErr\tGEOsnr\tH1\tH1ctrGPS\tH1fPlus\tH1fCross\tH1tErr\tH1cErr\tH1snr\tH2\tH2ctrGPS\tH2fPlus\tH2fCross\tH2tErr\tH2cErr\tH2snr\tL1\tL1ctrGPS\tL1fPlus\tL1fCross\tL1tErr\tL1cErr\tL1snr\tV1\tV1ctrGPS\tV1fPlus\tV1fCross\tV1tErr\tV1cErr\tV1snr"
 
 def write_burst_mdc_row( row, start=0 ):
+    """
+    Fill in a template row of a BurstMDC style (GravEn) log.
+    
+    Template:
+    template = simulation_id, hrss, egw, graven_amp, internal_x, internal_phi, external_x, external_phi, external_psi, frame_gps, earth_center_gps, waveform, simhphp, simhxhx, simhphx, g1fp, g1fx, 0, 0, 0, h1fp, h1fx, 0, 0, 0, h2fp, h2fx, 0, 0, 0, l1fp, l1fx, 0, 0, 0, v1fp, v1fx, 0, 0, 0
+    """
     sim_id = row.simulation_id
     sim_hrss = row
     # FIXME: What are these?
@@ -55,64 +61,94 @@ def write_burst_mdc_row( row, start=0 ):
     # The factor of 1.8597e-21 is to convert from units of M_s/pc^2 to SI units
     egw = (row.egw_over_rsquared or 0)*1.8597e-21
     # FIXME: This is wrong by the light travel time from earth center to det
-    g1fp, g1fx, _, _ = response( earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "G1" )
-    h1fp, h1fx, _, _ = response( earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "H1" )
-    h2fp, h2fx, _, _ = response( earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "H2" )
-    l1fp, l1fx, _, _ = response( earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "L1" )
-    v1fp, v1fx, _, _ = response( earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "V1" )
-    _, simhphp, simhxhx, simhphx = measure_hrss( row, 1/16384.0 )
+    g1fp, g1fx, _, _ = response(earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "G1")
+    h1fp, h1fx, _, _ = response(earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "H1")
+    h2fp, h2fx, _, _ = response(earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "H2")
+    l1fp, l1fx, _, _ = response(earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "L1")
+    v1fp, v1fx, _, _ = response(earth_center_gps, row.ra, row.dec, 0, row.psi, 'radians', "V1")
+    _, simhphp, simhxhx, simhphx = measure_hrss(row)
     hrss = row.hrss or 0
     template = "%d\t%g\t%g\t%f\t%f\t%f\t%f\t%f\t%f\t%10.10f\t%10.10f\t%s\t%g\t%g\t%g\tGEO\t%f\t%f\t%f\t%f\t%f\tH1\t%f\t%f\t%f\t%f\t%f\tH2\t%f\t%f\t%f\t%f\t%f\tL1\t%f\t%f\t%f\t%f\t%f\tV1\t%f\t%f\t%f\t%f\t%f" % (int(row.simulation_id), hrss, egw, graven_amp, internal_x, internal_phi, external_x, external_phi, external_psi, frame_gps, earth_center_gps, row.waveform, simhphp, simhxhx, simhphx, g1fp, g1fx, 0, 0, 0, h1fp, h1fx, 0, 0, 0, h2fp, h2fx, 0, 0, 0, l1fp, l1fx, 0, 0, 0, v1fp, v1fx, 0, 0, 0)
     return template
 
-def write_burst_mdc_log( fname, rows ):
-    f = open( fname, "w" )
+def write_burst_mdc_log(fname, rows):
+    """
+    Write out a set of BurstMDC (GravEn) rows into fname.
+    """
+    f = open(fname, "w")
     print >>f, header
     for row in rows:
         print >>f, row
     f.close()
 
-def measure_hrss( row, rate ):
+def measure_hrss(row, rate=16384.0):
+    """
+    Measure the various components of hrss (h+^2, hx^2, hphx) for a given input row. This is accomplished by generating the burst and calling the SWIG wrapped  XLALMeasureHrss in lalsimulation. Thus, the row object should be a SWIG wrapped SimBurst object. Rate is the sampling rate in Hz (default is 16kHz).
+    """
     swig_row = lalburst.CreateSimBurst()
     for a in lsctables.SimBurstTable.validcolumns.keys():
         try:
-            setattr( swig_row, a, getattr( row, a ) )
+            setattr(swig_row, a, getattr( row, a ))
         except AttributeError: continue # we didn't define it
         except TypeError: continue # the structure is different than the TableRow
-    hp, hx = lalburst.GenerateSimBurst( swig_row, 1/16384.0 )
-# FIXME: Totally inefficent
-    hp0, hx0 = lalburst.GenerateSimBurst( swig_row, 1/16384.0 )
+    hp, hx = lalburst.GenerateSimBurst(swig_row, 1.0/rate)
+    # FIXME: Totally inefficent --- but can we deep copy a SWIG SimBurst?
+    hp0, hx0 = lalburst.GenerateSimBurst(swig_row, 1.0/rate)
     hp0.data.data *= 0
     hx0.data.data *= 0
 
     # H+ hrss only
-    hphp = lalsimulation.MeasureHrss( hp, hx0 )**2
+    hphp = lalsimulation.MeasureHrss(hp, hx0)**2
     # Hx hrss only
-    hxhx = lalsimulation.MeasureHrss( hp0, hx )**2
+    hxhx = lalsimulation.MeasureHrss(hp0, hx)**2
     # sqrt(|Hx|^2 + |Hx|^2)
-    hrss = lalsimulation.MeasureHrss( hp, hx )
+    hrss = lalsimulation.MeasureHrss(hp, hx)
 
     hp.data.data = numpy.abs(hx.data.data) + numpy.abs(hp.data.data)
     # |H+Hx|
-    hphx = (lalsimulation.MeasureHrss( hp, hx0 )**2 - hrss**2)/2
+    hphx = (lalsimulation.MeasureHrss(hp, hx0)**2 - hrss**2)/2
     return hrss, hphp, hxhx, hphx
 
 def uniform_dec(num):
+    """
+    Declination distribution: uniform in sin(dec). num controls the number of draws.
+    """
     return (numpy.pi / 2.) - numpy.arccos(2 * random.random_sample(num) - 1)
 
 def uniform_theta(num):
+    """
+    Uniform in cos distribution. num controls the number of draws.
+    """
     return numpy.arccos(2 * random.random_sample(num) - 1)
 
 def uniform_phi(num):
+    """
+    Uniform in (0, 2pi) distribution. num controls the number of draws.
+    """
     return random.random_sample(num) * 2 * numpy.pi
 
 def uniform_interval(interval, num):
-    # http://docs.scipy.org/doc/numpy/reference/generated/numpy.random.random_sample.html#numpy.random.random_sample
+    """
+    Uniform in an interval, with the interval being a 2-tuple. num controls the number of draws. See also:
+
+    http://docs.scipy.org/doc/numpy/reference/generated/numpy.random.random_sample.html#numpy.random.random_sample
+    """
     return (interval[1] - interval[0]) * random.random_sample(num) + interval[0]
 
 # FIXME: Make different injection sources subclass this
 class source(object):
+    """
+    Generic container for different source types. Currently, it checks for the waveform type and initializes itself appropriately. In the future, different sources should subclass this and override the generation routines.
+    """
     def __init__(self, waveform, rate, tstart, tstop, **kwargs):
+        """
+        Initialize a source class. waveform is the name of the waveform family. Rate is the astrophysical rate (if applicable) of the source. tstart and tstop is the segment of time in which to generate the source. Additional arguments are applied on a case-by-case basis depending on the source class.
+
+        SineGaussian: q, frequency, hrss
+        StringCusp: frequency, amplitude
+        Impulse: hrss
+        BTLWNB: duration, bandwidth, frequency, egw, distance
+        """
         self.waveform = waveform
         if waveform == "SineGaussian":
             if not kwargs.has_key("q") or not kwargs.has_key("frequency") or not kwargs.has_key("hrss"):
@@ -121,10 +157,10 @@ class source(object):
             self.f_range = kwargs["frequency"]
             self.h_range = kwargs["hrss"]
         elif waveform == "StringCusp":
-            if not kwargs.has_key("frequency") or not kwargs.has_key("hrss"):
+            if not kwargs.has_key("frequency") or not kwargs.has_key("amplitude"):
                 raise ValueError("StringCusp distribution requires a range of amplitude and f.")
             self.f_range = kwargs["frequency"]
-            self.h_range = kwargs["hrss"]
+            self.h_range = kwargs["amplitude"]
         elif waveform == "BTLWNB":
             if not kwargs.has_key("duration") or not kwargs.has_key("bandwidth") or not kwargs.has_key("frequency"):
                 raise ValueError("BTLWNB distribution requires a range of frequency, bandwidth, and duration.")
@@ -147,14 +183,23 @@ class source(object):
         self.expnum = int(numpy.ceil((self.tstop-self.tstart) * self.rate / 365.0 / 24 / 3600 ))
 
     def log_hrss(self):
+        """
+        Draw uniformly in the log of a predefined hrss range
+        """
         log10h = segment(numpy.log10(self.h_range[0]), numpy.log10(self.h_range[1]))
-        return 10**uniform_interval( log10h, self.expnum )
+        return 10**uniform_interval(log10h, self.expnum)
 
     def log_egw(self):
+        """
+        Draw uniformly in the log of a predefined E_gw range
+        """
         log10e = segment(numpy.log10(self.egw_range[0]), numpy.log10(self.egw_range[1]))
-        return 10**uniform_interval( log10e, self.expnum )
+        return 10**uniform_interval(log10e, self.expnum)
 
     def draw_imp_params(self):
+        """
+        Draw a set of parameters (hrss) appropriate for a set of impulse type injections.
+        """
         h = []
         if type(self.h_range) == segment:
             h = self.log_hrss()
@@ -164,6 +209,9 @@ class source(object):
         return h
 
     def draw_sg_params(self):
+        """
+        Draw a set of parameters (hrss, q, frequency) appropriate for a set of sinegaussian type injections.
+        """
         h, q, f = [], [], []
         if type(self.q_range) == segment:
             q = uniform_interval(self.q_range, self.expnum)
@@ -178,17 +226,20 @@ class source(object):
         if type(self.f_range) == segment:
             f = uniform_interval(self.f_range, self.expnum)
         else:
-            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum) )
+            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
 
         return q, f, h
 
     def draw_cusp_params(self):
+        """
+        Draw a set of parameters (amplitude, frequency) appropriate for a set of stringcusp type injections.
+        """
         a, f = [], []
 
         if type(self.h_range) == segment:
             a = self.log_hrss()
         else:
-            a = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum) )
+            a = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum))
 
         # Translated from the binj.c source random_string_cusp_fhigh function
         #
@@ -204,11 +255,14 @@ class source(object):
             f = uniform_interval((thetasqmin, thetasqmax), self.expnum)
             f = f**(-3.0/2.0)
         else:
-            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum) )
+            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
 
         return a, f
 
     def draw_wnb_params(self):
+        """
+        Draw a set of parameters (bandwidth, duration, frequency, energy) appropriate for a set of BTLWNB type injections.
+        """
         b, d, f, e = [], [], [], []
 
         if type(self.b_range) == segment:
@@ -219,34 +273,41 @@ class source(object):
         if type(self.d_range) == segment:
             d = uniform_interval(self.d_range, self.expnum)
         else:
-            d = map(lambda i: self.d_range[i], random.randint(0, len(self.d_range), self.expnum) )
+            d = map(lambda i: self.d_range[i], random.randint(0, len(self.d_range), self.expnum))
 
         # FIXME: Make this logarithmic?
         if type(self.f_range) == segment:
             f = uniform_interval(self.f_range, self.expnum)
         else:
-            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum) )
+            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
 
         if type(self.egw_range) == segment:
             e = self.log_egw()
         else:
-            e = map(lambda i: self.egw_range[i], random.randint(0, len(self.egw_range), self.expnum) )
+            e = map(lambda i: self.egw_range[i], random.randint(0, len(self.egw_range), self.expnum))
 
         return b, d, f, e
 
     def uniform_sky(self):
+        """
+        Get a set of (RA, declination, polarization) randomized appopriately to astrophysical sources isotropically distributed in the sky.
+        """
         expnum = self.expnum
         ra = uniform_phi(expnum)
         dec = uniform_dec(expnum)
         pol = uniform_phi(expnum)
-        inc = uniform_theta(expnum)
-        phase = uniform_phi(expnum)
-        return ra, dec, pol, inc, phase
+        return ra, dec, pol
 
     def uniform_time(self):
+        """
+        Get a set of randomized (integer) event times.
+        """
         return random.randint(self.tstart, self.tstop, self.expnum) + random.rand(self.expnum)
 
     def volume_distributed_distances(self):
+        """
+        Get a set of event distances which is randomized uniformly in the volume.
+        """
         return random.power(3, self.expnum) * self.distance # 3 because it is this number minus 1 according to scipy doc
 
 
@@ -358,7 +419,7 @@ for srcname in options.burst_family:
             else:
                 raise ValueError("Current options do not constrain SG hrss values.")
 
-        srcs.append( source(srcname, options.event_rate, start, stop, q=q_values, frequency=f_values, hrss=h_values) )
+        srcs.append(source(srcname, options.event_rate, start, stop, q=q_values, frequency=f_values, hrss=h_values))
 
     if srcname == "StringCusp":
         if options.cusp_min_frequency is not None and options.cusp_max_frequency is not None:
@@ -370,14 +431,14 @@ for srcname in options.burst_family:
                 raise ValueError("Current options do not constrain cusp frequency values.")
 
         if options.cusp_min_amplitude is not None and options.cusp_max_amplitude is not None:
-            h_values = segment(options.cusp_min_amplitude, options.cusp_max_amplitude)
+            a_values = segment(options.cusp_min_amplitude, options.cusp_max_amplitude)
         else:
             if options.cusp_fix_amplitude is not None:
-                h_values = options.cusp_fix_amplitude
+                a_values = options.cusp_fix_amplitude
             else:
-                raise ValueError("Current options do not constrain SG amplitude values.")
+                raise ValueError("Current options do not constrain cusp amplitude values.")
 
-        srcs.append( source(srcname, options.event_rate, start, stop, frequency=f_values, hrss=h_values) )
+        srcs.append(source(srcname, options.event_rate, start, stop, frequency=f_values, amplitude=a_values))
 
     elif srcname == "Impulse":
         if options.imp_min_hrss is not None and options.imp_max_hrss is not None:
@@ -423,8 +484,7 @@ for srcname in options.burst_family:
             else:
                 raise ValueError("Current options do not constrain WNB E_GW values.")
 
-
-        srcs.append( source(srcname, options.event_rate, start, stop, distance=options.wnb_max_dist, duration=d_values, bandwidth=b_values, frequency=f_values, egw=e_values) )
+        srcs.append(source(srcname, options.event_rate, start, stop, distance=options.wnb_max_dist, duration=d_values, bandwidth=b_values, frequency=f_values, egw=e_values))
 
 for src in srcs:
 
@@ -437,7 +497,7 @@ for src in srcs:
 
     if src.waveform == "SineGaussian":
         q, f, hrss = src.draw_sg_params()
-    if src.waveform == "StringCusp":
+    elif src.waveform == "StringCusp":
         amp, f = src.draw_cusp_params()
     elif src.waveform == "Impulse":
         hrss = src.draw_imp_params()
@@ -445,7 +505,7 @@ for src in srcs:
         band, dur, f, egw = src.draw_wnb_params()
         dist = src.volume_distributed_distances()
 
-    ra, dec, pol, inc, phase = src.uniform_sky()
+    ra, dec, pol = src.uniform_sky()
 
     for i,t in enumerate(time):
         row = sim.RowType()
@@ -453,7 +513,7 @@ for src in srcs:
 
         # Required columns not defined makes ligolw unhappy
         for a in lsctables.SimBurstTable.validcolumns.keys():
-            setattr( row, a, None )
+            setattr(row, a, None)
 
         # string paramters
         row.waveform = src.waveform
@@ -510,14 +570,17 @@ for src in srcs:
             # dist in Mpc
             # expected units are M_solar / pc^2
             row.egw_over_rsquared = egw[i] / dist[i]**2 * 1e-12
-            row.hrss = measure_hrss( row, rate=1/16384.0 )[0]
+            row.hrss = measure_hrss(row)[0]
 
         sim.append(row)
 
 utils.write_filename(xmldoc, options.output, gz=options.output.endswith("gz"))
 
+#
+# Write a BurstMDC (GravEn) style ASCII log
+#
 if options.write_mdc_log:
     mdc_log = []
     for row in sim:
-        mdc_log.append( write_burst_mdc_row( row, start ) )
-    write_burst_mdc_log( options.write_mdc_log, mdc_log )
+        mdc_log.append(write_burst_mdc_row(row, start))
+    write_burst_mdc_log(options.write_mdc_log, mdc_log)
