@@ -6,6 +6,7 @@ import bisect
 from collections import defaultdict
 from optparse import OptionParser
 import itertools
+import md5
 
 import numpy
 import scipy.optimize
@@ -207,8 +208,50 @@ def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
     power = 4 * numpy.real(sum(nw_ip)) * hf.deltaF
     return numpy.sqrt(power)
 
+def rescale_injection_uniform_snr(inj_row, snr, snr_scale):
+    """
+    Reassign the injection SNR to be a random variate in the interval (tuple) provided in snr_scale. See rescale_injection_snr for details on how this is accomplished. Returns the new SNR chosen.
+    """
+    scale_abs = abs(snr_scale[1] - snr_scale[0])
+    new_snr = numpy.random.random() * scale_abs + snr_scale[0]
+    rescale_injection_snr(inj_row, snr, new_snr)
+    return new_snr
+
+def rescale_injection_normal_snr(inj_row, snr, mean, std):
+    """
+    Reassign the injection SNR to be a random variate drawn from a normal distribution centered on mean with a given variance. See rescale_injection_snr for details on how this is accomplished. Returns the new SNR chosen.
+    """
+    new_snr = numpy.random.normal(mean, std)
+    rescale_injection_snr(inj_row, snr, new_snr)
+    return new_snr
+
+def rescale_injection_snr(inj_row, snr, new_snr):
+    """
+    Rescale a parameter in the inj_row to match a new_snr value. The value of the new_snr argument will scale the injection to the provided value.
+    """
+
+    snr_ratio = new_snr / snr
+
+    if isinstance(inj_row, lsctables.SimInspiral):
+        inj_row.distance /= snr_ratio
+    elif inj_row.waveform == "BTLWNB":
+        inj_row.egw_over_rsquared *= snr_ratio**2
+    elif inj_row.waveform == "SineGaussian":
+        inj_row.hrss *= snr_ratio
+    elif inj_row.waveform == "StringCusp":
+        # CHECK: Is a string cusp injection SNR directly proportional to its
+        # amplitude?
+        inj_row.ampltude *= snr_ratio
+    elif inj_row.waveform == "Impulse":
+        inj_row.ampltude *= snr_ratio
+    else:
+        if hasattr(inj_row, "waveform"):
+            raise ValueError("Don't know how to scale burst waveform %s" % inj_row.waveform)
+        else:
+            raise ValueError("Don't know how to scale %s" % str(type(inj_row)))
+
 #
-# Efficiency calcualtion routines
+# Efficiency calculation routines
 #
 
 def loglogistic( x, alpha, beta ):
@@ -269,12 +312,35 @@ optp.add_option("--verbose", action="store_true", help="Be verbose.")
 optp.add_option("--single-snr-cut-thresh", type=float, help="Cut any injection with a single detector SNR less than this.")
 optp.add_option("--coherent-snr-cut-thresh", type=float, help="Cut any injection with a coherent SNR less than this.")
 optp.add_option("--coherent-amplitude-cut-thresh", type=float, help="Cut any injection with a cWB coherent ampltiude (eta) less than this.")
+optp.add_option("--sim-id", type=int, help="Only calculate for simulation_id N")
 optp.add_option("--store-sngl", help="Store the values of the simulated event and SNR calculation in a sngl_* event row. Valid choices are sngl_inspiral, sngl_burst.")
 optp.add_option("--store-sim", action="store_true", help="Store the value of the SNR calculation in a sim_burst event row in the column ``amplitude''. This is only valid for sim_bursts.")
+
 optp.add_option("--squeeze-attribute", default="hrss", help="Squeeze this attribute for injections so as to make the more detectable. Default is 'hrss'. You might try 'distance' for SimInspirals.")
-optp.add_option("--sim-id", type=int, help="Only calculate for simulation_id N")
+
+optp.add_option("--rescale-snr-uniform-min", type=float, help="Rescale all SNRs to be uniform deviates within range specified by this and --rescale-snr-uniform-max")
+optp.add_option("--rescale-snr-uniform-max", type=float, help="Rescale all SNRs to be uniform deviates within range specified by this and --rescale-snr-uniform-min")
+optp.add_option("--rescale-snr-normal-mean", type=float, help="Rescale all SNRs to be normal deviates with parameters specified by this and --rescale-snr-normal-stddev")
+optp.add_option("--rescale-snr-normal-stddev", type=float, help="Rescale all SNRs to be normal deviates with parameters specified by this and --rescale-snr-normal-mean")
 
 opts, args = optp.parse_args()
+
+#
+# Sanity checks
+#
+uniform_scale, norm_params = None, None
+if opts.rescale_snr_uniform_min and not opts.rescale_snr_uniform_max:
+    sys.exit("Uniform rescaling requested, but bounds not completely specified.")
+elif opts.rescale_snr_uniform_min and opts.rescale_snr_uniform_max:
+    uniform_scale = (opts.rescale_snr_uniform_min, opts.rescale_snr_uniform_max)
+
+if opts.rescale_snr_normal_mean and not opts.rescale_snr_normal_stddev:
+    sys.exit("Normal rescaling requested, but parameters not completely specified.")
+elif opts.rescale_snr_normal_mean and opts.rescale_snr_normal_stddev:
+    norm_params = (opts.rescale_snr_normal_mean, opts.rescale_snr_normal_stddev)
+
+if uniform_scale is not None and norm_params is not None:
+    sys.exit("Two rescaling strategy parameter sets requested, please choose either --rescale-snr-normal-* or --rescale-snr-uniform-*")
 
 #
 # Detector, PSD setup
@@ -324,10 +390,22 @@ fwdlen = int(2.0*fnyq/deltaF)
 fwdplan = lal.CreateForwardREAL8FFTPlan( fwdlen, 0 )
 
 #
+# Get XML document contents
+#
+xmldoc = utils.load_filename(args[0])
+
+#
+# Initialize random seed
+# This is done so as to ensure the same random SNRs are drawn each time for any
+# given file
+#
+with open(args[0]) as xmlfile:
+    h = md5.new(xmlfile.read())
+    numpy.random.seed(int(h.hexdigest()[:8], 16))
+
+#
 # Get sim tables
 #
-
-xmldoc = utils.load_filename( args[0] )
 sims = []
 sim_burst = []
 try:
@@ -417,14 +495,32 @@ for row in sims:
                 length = h.data.length/2 + 1
         )
 
-        lal.REAL8TimeFreqFFT( hf, h, fwdplan )
+        lal.REAL8TimeFreqFFT(hf, h, fwdplan)
         injection_waveforms[d] = hf
 
         snr[d] = hoff_single_ifo_snr(hf, psd, f_low_wave, min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency))
+
+        #
+        # Reassign SNRs to be within a certain range
+        #
+        old_snr = snr[d]
+        if norm_params is not None:
+            snr[d] = rescale_injection_normal_snr(row, snr[d], norm_params[0], norm_params[1])
+        elif uniform_scale is not None:
+            snr[d] = rescale_injection_uniform_snr(row, snr[d], uniform_scale)
+        hf.data.data *= snr[d]/old_snr
+
+        #
+        # Print out some information
+        #
         if opts.machine_parse and not opts.no_print_single_ifo:
             print snr[d]
         elif not opts.no_print_single_ifo:
             print "Waveform %s at %10.3f has SNR in %s of %f" % (row.waveform, time, d, snr[d])
+
+        #
+        # Make 'sngl_' rows with the optimal SNR information
+        #
         if opts.store_sngl == "sngl_inspiral":
             sngl_row = sim_to_sngl_insp(row, det.frDetector.prefix, sngl_table)
             sngl_row.snr = snr[d]
@@ -434,6 +530,9 @@ for row in sims:
             sngl_row.snr = snr[d]**2 # SNR column is energy, really
             sngl_row.event_id = sngl_table.get_next_id()
 
+    #
+    # Network SNR
+    #
     net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
     if opts.store_sim:
         row.amplitude = net_snr**2
@@ -476,7 +575,6 @@ for row in sims:
     hp_coh_f = hp_coh / S_f_coh[0]
     hx_coh_f = hx_coh / S_f_coh[1]
 
-
     # Creighton and Anderson eq. 7.138
     coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
     coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
@@ -514,8 +612,38 @@ for row in sims:
     injected[row.waveform].append( row )
     count[row.waveform] += 1
 
+#
+# Output rescaled SNRs
+#
+if norm_params is not None or uniform_scale is not None:
+    xmldoc = ligolw.Document()
+    xmldoc.appendChild(ligolw.LIGO_LW())
+    if sim_burst:
+        simb_snr_table = lsctables.New(lsctables.SimBurstTable, sim_burst.validcolumns)
+    if sim_insp:
+        simi_snr_table = lsctables.New(lsctables.SimInspiralTable, sim_inspiral.validcolumns)
+    for sim in sims:
+        if isinstance(sim, lsctables.SimInspiral):
+            simi_snr_table.append(sim)
+        elif isinstance(sim, lalmetaio.SimInspiralTable):
+            simi_snr_table.append(copy_sim_inspiral_swig(sim, simi_snr_table))
+        elif isinstance(sim, lsctables.SimBurst):
+            simb_snr_table.append(sim)
+        elif isinstance(sim, lalmetaio.SimBurst):
+            simb_snr_table.append(copy_sim_burst_swig(sim, simb_snr_table))
+
+    if sim_burst and simb_snr_table:
+        xmldoc.childNodes[0].appendChild(simb_snr_table)
+    if sim_insp and simi_snr_table:
+        xmldoc.childNodes[0].appendChild(simi_snr_table)
+
+    utils.write_filename(xmldoc, "snr_rescaled.xml.gz", gz=True)
+
+#
+# Identify injections not passing the SNR thresholds
+#
 try:
-    sim_burst = table.get_table( xmldoc, lsctables.SimBurstTable.tableName )
+    sim_burst = table.get_table(xmldoc, lsctables.SimBurstTable.tableName)
     sb_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimBurst, cut_sims))
     print "%d burst injections would be cut from SNR thresholds." % len(sb_ids)
     n = len(sim_burst)-1
@@ -525,7 +653,7 @@ try:
 except ValueError:
     pass
 try:
-    sim_insp = table.get_table( xmldoc, lsctables.SimInspiralTable.tableName )
+    sim_insp = table.get_table(xmldoc, lsctables.SimInspiralTable.tableName)
     si_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimInspiralTable, cut_sims))
     print "%d inspiral injections would be cut from SNR thresholds." % len(si_ids)
     n = len(sim_insp)-1
@@ -535,6 +663,9 @@ try:
 except ValueError:
     pass
 
+#
+# Record "triggers" with optimal information
+#
 if opts.store_sngl is not None or opts.store_sim:
     xmldoc = ligolw.Document()
     xmldoc.childNodes.append(ligolw.LIGO_LW())
