@@ -59,7 +59,7 @@ def copy_sim_burst_swig( swigrow, table ):
     row.egw_over_rsquared = swigrow.egw_over_rsquared or 0
     row.waveform_number = swigrow.waveform_number or 0
     row.pol_ellipse_angle = swigrow.pol_ellipse_angle or 0.0
-    row.simulation_id = ilwd.ilwdchar("sim_burst:sim_burst_id:%d" % swigrow.simulation_id)
+    row.simulation_id = ilwd.ilwdchar("sim_burst:simulation_id:%d" % swigrow.simulation_id)
     row.q = swigrow.q
     row.waveform = swigrow.waveform
     row.bandwidth = swigrow.bandwidth
