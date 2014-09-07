@@ -6,12 +6,14 @@ import bisect
 from collections import defaultdict
 from optparse import OptionParser
 import itertools
-import md5
+import hashlib
 
 import numpy
 import scipy.optimize
 
 from glue.ligolw import lsctables, table, utils, ligolw, ilwd
+table.use_in(ligolw.LIGOLWContentHandler)
+lsctables.use_in(ligolw.LIGOLWContentHandler)
 from glue import lal as gluelal
 from glue.ligolw.utils import process
 
@@ -108,7 +110,7 @@ def parse_psd_file( filestr ):
     """
     try:
         xmldoc = utils.load_filename(filestr)
-        psd = read_psd_xmldoc(xmldoc).values()[0]
+        psd = read_psd_xmldoc(xmldoc, contenthandler=ligolw.LIGOLWContentHandler).values()[0]
         f = numpy.arange(0, len(psd.data)*psd.deltaF, psd.deltaF)
         psd = psd.data
     except:
@@ -392,7 +394,7 @@ fwdplan = lal.CreateForwardREAL8FFTPlan( fwdlen, 0 )
 #
 # Get XML document contents
 #
-xmldoc = utils.load_filename(args[0])
+xmldoc = utils.load_filename(args[0], contenthandler=ligolw.LIGOLWContentHandler)
 
 #
 # Initialize random seed
@@ -400,7 +402,7 @@ xmldoc = utils.load_filename(args[0])
 # given file
 #
 with open(args[0]) as xmlfile:
-    h = md5.new(xmlfile.read())
+    h = hashlib.new("md5", xmlfile.read())
     numpy.random.seed(int(h.hexdigest()[:8], 16))
 
 #
