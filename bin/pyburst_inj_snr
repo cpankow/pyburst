@@ -195,7 +195,7 @@ def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
     """
     hrss = hf.data.data.conj() * hf.data.data
     if psd is None:
-        return sqrt(hrss.sum())
+        return sqrt(hrss.sum()*hf.deltaF)
     # Determine limits of integration
     #print "Low frequency of integration %f" % int_f_low_bin
     int_f_low_bin = int(numpy.round(f_low/hf.deltaF))
