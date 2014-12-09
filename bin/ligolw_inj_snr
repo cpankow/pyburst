@@ -324,20 +324,25 @@ optp.add_option("--rescale-snr-uniform-min", type=float, help="Rescale all SNRs 
 optp.add_option("--rescale-snr-uniform-max", type=float, help="Rescale all SNRs to be uniform deviates within range specified by this and --rescale-snr-uniform-min")
 optp.add_option("--rescale-snr-normal-mean", type=float, help="Rescale all SNRs to be normal deviates with parameters specified by this and --rescale-snr-normal-stddev")
 optp.add_option("--rescale-snr-normal-stddev", type=float, help="Rescale all SNRs to be normal deviates with parameters specified by this and --rescale-snr-normal-mean")
+optp.add_option("--rescale-snr-network", action="store_true", help="Use network SNR to rescale the injection strength.")
 
 opts, args = optp.parse_args()
 
 #
 # Sanity checks
 #
-uniform_scale, norm_params = None, None
+uniform_scale, uniform_scale_network, norm_params, norm_params_network = None, None, None, None
 if opts.rescale_snr_uniform_min and not opts.rescale_snr_uniform_max:
     sys.exit("Uniform rescaling requested, but bounds not completely specified.")
+elif opts.rescale_snr_network and opts.rescale_snr_uniform_min and opts.rescale_snr_uniform_max:
+    uniform_scale_network = (opts.rescale_snr_uniform_min, opts.rescale_snr_uniform_max)
 elif opts.rescale_snr_uniform_min and opts.rescale_snr_uniform_max:
     uniform_scale = (opts.rescale_snr_uniform_min, opts.rescale_snr_uniform_max)
 
 if opts.rescale_snr_normal_mean and not opts.rescale_snr_normal_stddev:
     sys.exit("Normal rescaling requested, but parameters not completely specified.")
+elif opts.rescale_snr_network and opts.rescale_snr_normal_mean and opts.rescale_snr_normal_stddev:
+    norm_params_network = (opts.rescale_snr_normal_mean, opts.rescale_snr_normal_stddev)
 elif opts.rescale_snr_normal_mean and opts.rescale_snr_normal_stddev:
     norm_params = (opts.rescale_snr_normal_mean, opts.rescale_snr_normal_stddev)
 
@@ -596,6 +601,14 @@ for row in sims:
         print "%g" % eta_est
     elif not opts.no_print_cwb:
         print "Estimated cWB ranking statistic (1G) %g" % eta_est
+
+    #
+    # Reassign SNRs to be within a certain range -- network version
+    #
+    if norm_params_network is not None:
+        rescale_injection_normal_snr(row, net_snr, norm_params_network[0], norm_params_network[1])
+    elif uniform_scale_network is not None:
+        rescale_injection_uniform_snr(row, net_snr, uniform_scale_network)
 
     if opts.single_snr_cut_thresh is not None and any(map(lambda s: s < opts.single_snr_cut_thresh, snr.values())):
         cut_sims.append( (type(row), row.simulation_id ) )
