@@ -444,7 +444,7 @@ if opts.store_sngl == "sngl_inspiral":
 elif opts.store_sngl == "sngl_burst":
     sngl_table = sim_to_sngl_table(lsctables.SimBurstTable, lsctables.SnglBurstTable)
 
-sim_snr_table = lsctables.New(lsctables.SimBurstTable, sim_burst.validcolumns)
+sim_snr_table = lsctables.New(lsctables.SimBurstTable)
 
 i = 0
 for row in sims:
