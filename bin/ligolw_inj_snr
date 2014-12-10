@@ -234,7 +234,7 @@ def rescale_injection_snr(inj_row, snr, new_snr):
 
     snr_ratio = new_snr / snr
 
-    if isinstance(inj_row, lsctables.SimInspiral):
+    if isinstance(inj_row, lsctables.SimInspiral) or isinstance(inj_row, lalmetaio.SimInspiralTable):
         inj_row.distance /= snr_ratio
     elif inj_row.waveform == "BTLWNB":
         inj_row.egw_over_rsquared *= snr_ratio**2
