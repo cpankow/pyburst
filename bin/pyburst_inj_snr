@@ -630,7 +630,7 @@ for row in sims:
 #
 # Output rescaled SNRs
 #
-if norm_params is not None or uniform_scale is not None:
+if norm_params_network is not None or norm_params is not None or uniform_scale is not None:
     xmldoc = ligolw.Document()
     xmldoc.appendChild(ligolw.LIGO_LW())
     if sim_burst:
