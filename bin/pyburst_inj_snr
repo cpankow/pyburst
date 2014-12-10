@@ -353,9 +353,9 @@ if uniform_scale is not None and norm_params is not None:
 # Detector, PSD setup
 #
 
-detectors = {"H1": lal.lalCachedDetectors[lal.LAL_LHO_4K_DETECTOR],
-             "L1": lal.lalCachedDetectors[lal.LAL_LLO_4K_DETECTOR],
-             "V1": lal.lalCachedDetectors[lal.LAL_VIRGO_DETECTOR]}
+detectors = {"H1": lal.CachedDetectors[lal.LHO_4K_DETECTOR],
+             "L1": lal.CachedDetectors[lal.LLO_4K_DETECTOR],
+             "V1": lal.CachedDetectors[lal.VIRGO_DETECTOR]}
 uniq_det_comb = list( itertools.combinations( detectors.keys(), 2 ) )
 
 # Default is R=8192, and data with a length of 32 seconds. Sorta excessive.
@@ -498,7 +498,7 @@ for row in sims:
                 epoch = h.epoch,
                 f0 = 0,
                 deltaF = deltaF,
-                sampleUnits = lal.lalDimensionlessUnit,
+                sampleUnits = lal.DimensionlessUnit,
                 length = h.data.length/2 + 1
         )
 
