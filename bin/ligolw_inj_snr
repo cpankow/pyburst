@@ -634,9 +634,9 @@ if norm_params is not None or uniform_scale is not None:
     xmldoc = ligolw.Document()
     xmldoc.appendChild(ligolw.LIGO_LW())
     if sim_burst:
-        simb_snr_table = lsctables.New(lsctables.SimBurstTable, sim_burst.validcolumns)
+        simb_snr_table = lsctables.New(lsctables.SimBurstTable)
     if sim_insp:
-        simi_snr_table = lsctables.New(lsctables.SimInspiralTable, sim_inspiral.validcolumns)
+        simi_snr_table = lsctables.New(lsctables.SimInspiralTable)
     for sim in sims:
         if isinstance(sim, lsctables.SimInspiral):
             simi_snr_table.append(sim)
