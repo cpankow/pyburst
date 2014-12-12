@@ -47,6 +47,22 @@ def copy_sim_inspiral( row ):
     swigrow.geocent_end_time = lal.LIGOTimeGPS(row.geocent_end_time, row.geocent_end_time_ns)
     return swigrow
 
+def copy_sim_inspiral_swig( swigrow, table ):
+    """ 
+    Turn a SWIG wrapped lalburst.SimInspiral into a lsctables.SimInspiral 
+    """
+
+    row = table.RowType()
+
+    for simattr in lsctables.SimInspiralTable.validcolumns.keys():
+        if simattr in ["waveform", "source", "numrel_data", "taper"]:
+            # unicode -> char* doesn't work
+            setattr( row, simattr, str(getattr(swigrow, simattr)) )
+        else:
+            setattr( row, simattr, getattr(swigrow, simattr) )
+
+    return row
+
 def copy_sim_burst_swig( swigrow, table ):
     """
     Turn a SWIG wrapped lalburst.SimBurst into a lsctables.SimBurst
