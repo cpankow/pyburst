@@ -471,8 +471,6 @@ for row in sims:
         elif type(row) == lalmetaio.SimBurst:
             time = row.time_geocent_gps
             hp, hx = lalburst.GenerateSimBurst( row, 0.5/fnyq )
-            hp.epoch += time
-            hx.epoch += time
             h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
                     row.ra, row.dec, row.psi, det )
             ra, dec, psi = row.ra, row.dec, row.psi
