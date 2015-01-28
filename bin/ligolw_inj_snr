@@ -254,6 +254,7 @@ def rescale_injection_snr(inj_row, snr, new_snr):
         inj_row.distance /= snr_ratio
     elif inj_row.waveform == "BTLWNB":
         inj_row.egw_over_rsquared *= snr_ratio**2
+        inj_row.hrss *= snr_ratio
     elif inj_row.waveform == "SineGaussian":
         inj_row.hrss *= snr_ratio
     elif inj_row.waveform == "StringCusp":
@@ -262,6 +263,7 @@ def rescale_injection_snr(inj_row, snr, new_snr):
         inj_row.ampltude *= snr_ratio
     elif inj_row.waveform == "Impulse":
         inj_row.ampltude *= snr_ratio
+        inj_row.hrss *= snr_ratio
     else:
         if hasattr(inj_row, "waveform"):
             raise ValueError("Don't know how to scale burst waveform %s" % inj_row.waveform)
