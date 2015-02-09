@@ -1,0 +1,485 @@
+#!/usr/bin/env python
+# Copyright (C) 2015 Chris Pankow
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; either version 2 of the License, or (at your
+# option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with with program; see the file COPYING. If not, write to the Free
+# Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+# 02111-1307  USA
+#
+__program__ = 'pyburst_excesspower'
+import sys
+import math
+from argparse import ArgumentParser
+
+import numpy
+
+from glue.ligolw import lsctables, utils, ligolw
+from glue.lal import LIGOTimeGPS
+
+import glue
+from glue.ligolw.utils.process import register_to_xmldoc
+from glue.ligolw.utils.search_summary import append_search_summary
+from glue.segments import segment
+from glue.lal import LIGOTimeGPS
+
+import lal, lalburst
+
+from pycbc import frame, strain, psd, filter, types, DYN_RANGE_FAC
+from pycbc.fft import fft, ifft
+import logging
+
+def construct_args():
+    argp = ArgumentParser()
+    argp.add_argument("--tile-fap", type=float, default=1e-7, help="Tile false alarm probability threshold in Gaussian noise. Default is 1e-7")
+    argp.add_argument("--verbose", action="store_true", help="Be verbose")
+    argp.add_argument("--min-frequency", type=float, default=0, help="Lowest frequency of the filter bank, default is 0 Hz.")
+    argp.add_argument("--max-frequency", type=float, default=None, help="Highest frequency of the filter bank, default is None, meaning use Nyquist.")
+    argp.add_argument("--tile-bandwidth", type=float, default=None, help="Bandwidth of the finest filters. Default is None, and would be inferred from the data bandwidth and number of channels.")
+    argp.add_argument("--channels", type=int, default=None, help="Number of frequency channels to use. Default is None, and would be inferred from the data bandwidth and tile bandwidth.")
+    strain.insert_strain_option_group(argp)
+    psd.insert_psd_option_group(argp)
+    return argp
+
+def calculate_spectral_correlation(fft_window_len, wtype='hann'):
+    # FIXME Dict -> window function map
+    if wtype == 'hann':
+        window = lal.CreateHannREAL8Window(fft_window_len)
+    else:
+        raise ValueError("Can't handle window type %s" % wtype)
+
+    fft_plan = lal.CreateForwardREAL8FFTPlan(len(window.data.data), 1)
+
+    return lalburst.REAL8WindowTwoPointSpectralCorrelation(window, fft_plan)
+
+def create_filter_bank(delta_f, flow, band, nchan, psd, spec_corr):
+    filter_length = int(2*band/delta_f)+1
+    filter_fseries = numpy.zeros((nchan, filter_length), dtype=numpy.complex128)
+    lal_psd = psd.lal()
+    lal_filters = []
+    for i in range(nchan):
+        lal_filter = lalburst.CreateExcessPowerFilter(flow + i*band, band, lal_psd, spec_corr)
+        #print lal_filter.name
+
+        #print lalburst.ExcessPowerFilterInnerProduct(lal_filter, lal_filter, spec_corr, None)
+        # DEBUG one is 1/sqrt of another
+        #ts = types.FrequencySeries(lal_filter.data.data, delta_f=lal_filter.deltaF, copy=False).to_timeseries(1.0/8192)
+        #print numpy.sqrt(sum(ts**2))/32.0
+
+        filter_fseries[i,:] = lal_filter.data.data*numpy.sqrt(32)
+        lal_filters.append(lal_filter)
+    return filter_fseries, lal_filters
+
+def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True):
+    """
+    Compute the renormalization for the base filters up to a given bandwidth.
+    """
+    min_band = (len(lal_filters[0].data.data)-1) * lal_filters[0].deltaF / 2
+
+    if verbose:
+        sys.stdout.write("Calculating renormalization for resolution level containing %d %f Hz channels" % (nc_sum+1, min_band))
+    mu_sq = (nc_sum+1)*numpy.array([lalburst.ExcessPowerFilterInnerProduct(f, f, spec_corr, None) for f in lal_filters])
+
+    # Uncomment to get all possible frequency renormalizations
+    #for n in xrange(nc_sum, nchans): # channel position index
+    for n in xrange(nc_sum, nchans, nc_sum+1): # channel position index
+        for k in xrange(0, nc_sum): # channel sum index
+            mu_sq[n] += lalburst.ExcessPowerFilterInnerProduct(lal_filters[n-k], lal_filters[n-1-k], spec_corr, None)
+    #print mu_sq[nc_sum::nc_sum+1]
+    if verbose:
+        print " done."
+
+    return mu_sq
+
+
+def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, duration, band, df, dt):
+    start_time = LIGOTimeGPS(float(start_time))
+    for i, j in zip(*numpy.where(tfmap > threshold)):
+        event = event_list.RowType()
+        # The points are summed forward in time and thus a `summed point' is the
+        # sum of the previous N points. If this point is above threshold, it
+        # corresponds to a tile which spans the previous N points. However, th
+        # 0th point (due to the convolution specifier 'valid') is actually
+        # already a duration from the start time. All of this means, the +
+        # duration and the - duration cancels, and the tile 'start' is, by
+        # definition, the start of the time frequency map if j = 0
+        # FIXME: I think this needs a + dt/2 to center the tile properly
+        event.set_start(start_time + float(j * dt))
+        event.set_peak(event.get_start() + duration / 2)
+        event.central_freq = start_freq + i * df + 0.5 * band
+        event.duration = duration
+        event.bandwidth = band
+        event.chisq_dof = 2 * duration * band
+        event.snr = math.sqrt(tfmap[i,j] / event.chisq_dof - 1)
+        #event.snr = tfmap[i,j]
+        event.confidence = 0 # FIXME
+        event.amplitude = 0 # FIXME
+        event.process_id = None
+        event.event_id = event_list.get_next_id()
+        event_list.append(event)
+
+def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0):
+    """
+    Given an input data stretch segment inseg, a data block stride dt_stride, the data sample rate, and an optional window_fraction, return the amount of data that can be processed without corruption effects from the window.
+
+    If window_fration is set to 0 (default), assume no windowing.
+    """
+    # Amount to overlap successive blocks so as not to lose data
+    window_overlap_samples = window_fraction * sample_rate
+    outseg = inseg.contract(window_fraction * dt_stride / 2)
+
+    # With a given dt_stride, we cannot process the remainder of this data
+    remainder = math.fmod(abs(outseg), dt_stride * (1 - window_fraction))
+    # ...so make an accounting of it
+    outseg = segment(outseg[0], outseg[1] - remainder)
+    return outseg
+
+#
+# Preliminaries
+#
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
+
+argp = construct_args()
+args = argp.parse_args()
+
+#
+# Time - frequency settings
+#
+
+inseg = segment(LIGOTimeGPS(args.gps_start_time), LIGOTimeGPS(args.gps_end_time))
+
+# How long to process in a block of data?
+dt_stride = 8
+# same, in samples
+ts_stride = dt_stride * args.sample_rate
+
+# How much data on either side of the tukey window to discard
+# NOTE: Nominally, this means that one will lose window_fraction * dt_stride to
+# corruption from the window: this is simply discarded
+# NOTE 2: This is tuned to give an integer offset when used with dt_stride = 8,
+# smaller windows will have fractions of integers, but larger powers of two will
+# still preseve this --- probably not a big deal in the end
+window_fraction = 0.25
+
+outseg = determine_output_segment(inseg, dt_stride, args.sample_rate, window_fraction)
+
+# Bin spacing of the PSD (and filters), lowest frequency of the first filter
+delta_f, flow = 1.0/dt_stride, 0.0
+#delta_f, flow = 1.0/dt_stride, 16.0
+
+if args.min_frequency < args.strain_high_pass:
+    print >>sys.stderr, "Warning: strain high pass frequency %f is greater than the tile minimum frequency %f --- this is likely to cause strange output below the bandpass frequency" % (args.strain_high_pass, args.min_frequency)
+
+if args.max_frequency is None:
+    args.max_frequency = args.sample_rate / 2.0
+
+if args.tile_bandwidth is None and args.channels is None:
+    exit("Either --tile-bandwidth or --channels must be specified to set up time-frequency plane")
+else:
+    assert args.max_frequency >= args.min_frequency
+    data_band = args.max_frequency - args.min_frequency
+
+    if args.tile_bandwidth is not None:
+        nchans = args.channels = int(data_band / args.tile_bandwidth)
+    elif args.channels is not None:
+        band = args.tile_bandwidth = data_band / args.channels
+
+    assert args.channels > 1
+
+# minimum bandwidth
+band = 4.0 # Hz
+
+# Number of channels
+nchans = args.sample_rate / 2 / band - 1
+#nchans = 64
+nchans = 1023
+
+event_list = lsctables.New(lsctables.SnglBurstTable, ['start_time', 'start_time_ns', 'peak_time', 'peak_time_ns', 'duration', 'bandwidth', 'central_freq', 'chisq_dof', 'confidence', 'snr', 'amplitude', 'channel', 'ifo', 'process_id', 'event_id', 'search'])
+
+ts_data = strain.from_cli(args, precision='double', dyn_range_fac=DYN_RANGE_FAC)
+
+#
+# Estimate PSD
+#
+
+fd_psd = psd.from_cli(args, int(8192/delta_f)/2+1, delta_f, flow, ts_data, dyn_range_factor=DYN_RANGE_FAC)
+# DEBUG for gaussian noise
+#for i in range(len(fd_psd)):
+    #fd_psd[i] = 2.0/args.sample_rate
+
+#import matplotlib
+#matplotlib.use("agg")
+#from matplotlib import pyplot
+
+#pyplot.plot(fd_psd.sample_frequencies, fd_psd)
+#pyplot.loglog()
+#pyplot.savefig("psd.png")
+#exit()
+
+# FIXME: Implicitly assumes Hann window from ts_data creation
+spec_corr = calculate_spectral_correlation(args.sample_rate*8)
+# FIXME: Move to function. Since we don't window the data for whitening purposes
+# this has no meaning beyond a delta function
+spec_corr.data *= 0.0
+spec_corr.data[0] = 1.0
+
+# TODO: Match these up
+filter_bank, lal_filters = create_filter_bank(fd_psd.delta_f, flow+band/2, band, nchans, fd_psd, spec_corr)
+
+#
+# Compute normalization for virtual channel
+#
+
+mu_sq_dict = {}
+for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel adds
+    nc_sum = 2**nc_sum - 1
+    mu_sq_dict[nc_sum] = compute_channel_renomalization(nc_sum, lal_filters, spec_corr)
+
+#
+# Convert to TF plane
+#
+
+tf_map = numpy.zeros((nchans, ts_stride))
+
+#full_map = dict()
+
+stat_sum = {}
+stat_sum_sq = {}
+
+numpy.random.seed(0)
+t_idx_min, t_idx_max = 0, ts_stride
+while t_idx_max <= len(ts_data):
+
+    print "Analyzing block %10.9f" % (ts_data.start_time + t_idx_min/float(args.sample_rate))
+
+    # DEBUG: for gaussian noise
+    #print "Generating random time series"
+    #for i in range(t_idx_min, t_idx_max):
+        #ts_data[i] = numpy.random.normal(0, 1)
+    #print "Done"
+
+    fs_data = types.FrequencySeries(numpy.zeros(ts_stride/2+1, dtype=numpy.complex128), delta_f=1.0/dt_stride)
+
+    tmp_ts_data = types.TimeSeries(ts_data[t_idx_min:t_idx_max]*lal.CreateTukeyREAL8Window(t_idx_max-t_idx_min, window_fraction).data.data, 1.0/args.sample_rate, epoch=ts_data.start_time + float(t_idx_min)/args.sample_rate)
+    #fs_data = ts_data[t_idx_min:t_idx_max].to_frequencyseries(1.0/dt_stride)
+    fs_data = tmp_ts_data.to_frequencyseries(1.0/dt_stride)
+    
+    #
+    # Frequency domain filtering
+    #
+
+    # Force planning to happen
+    tmp_filter_bank = numpy.zeros(len(fd_psd), dtype=numpy.complex128)
+    filter.matched_filter_core(types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f), fs_data, h_norm=1, psd=fd_psd, low_frequency_cutoff=lal_filters[0].f0, high_frequency_cutoff=lal_filters[0].f0+2*band)
+
+    # Whiten
+    # FIXME: Attach this to the template?
+    fs_data.data /= numpy.sqrt(fd_psd)
+
+    import time
+    tdiff = time.time()
+    print "Beginning filtering: %d" % int(tdiff)
+    for i in range(nchans):
+
+        # Reset filter bank series
+        tmp_filter_bank *= 0.0
+
+        if args.verbose:
+            print "Filter %d: %d FD samples" % (i, len(tmp_filter_bank))
+            print "Beginning filtering %d / %d: %d" % (i, nchans, time.time() - tdiff)
+
+        f1 = int(lal_filters[i].f0/fd_psd.delta_f)
+        f2 = int((lal_filters[i].f0 + 2*band)/fd_psd.delta_f)+1
+        tmp_filter_bank[f1:f2] = filter_bank[i]
+
+        filtered_series = filter.matched_filter_core(
+            types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f, copy=False), 
+            fs_data, 
+            h_norm=None, 
+            psd=None, 
+            low_frequency_cutoff=lal_filters[i].f0, 
+            high_frequency_cutoff=lal_filters[i].f0+2*band)
+
+        tf_map[i,:] = filtered_series[0].numpy().real
+
+    tdiff = time.time() - tdiff
+    print "Done filtering: %d, total %f" % (int(time.time()), tdiff)
+
+    #print tf_map.shape
+    #print tf_map.std(axis=1)
+    #print tf_map.std()
+
+    if True:
+        chan_sum_range = [xrange(0, int(math.log(nchans, 2))+1)]
+    else:
+        chan_sum_range = [2**l for l in xrange(0, int(math.log(nchans, 2))+1)]
+
+    # Clip the boundaries to remove window corruption
+    clip_samples = dt_stride * window_fraction * args.sample_rate / 2
+
+    #from scipy.signal import fftconvolve
+    #for nc_sum in range(0, 1): # nc_sum additional channel adds
+    #for nc_sum in range(0, nchans): # nc_sum additional channel adds
+    for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel adds
+        # FIXME: the minus one is to undo things later
+        nc_sum = 2**nc_sum - 1
+        print "Summing %d narrow band channels" % (nc_sum+1)
+    
+        # FIXME: What to do here?
+        # Okay, what I mean is, if the us rate is not an integer multiple
+        # This would invoke a resampling, likely
+        us_rate = int(1.0 / (2 * band*(nc_sum+1) * ts_data.delta_t)) # FIXME: x2 ?
+
+        #
+        # Construct virtual channels
+        #
+
+        mu_sq = mu_sq_dict[nc_sum]
+
+        #print tf_map[:,::us_rate].std(axis=1)
+        sys.stderr.write("\t...calculating tiles...")
+
+        ####################
+        # FIXME: This works, but seems to be slover than 1d convolution
+        #tiles = fftconvolve(tf_map[:,::us_rate], numpy.ones((nc_sum+1, 1)), 'valid')
+
+        #print tiles.std(axis=1)
+        # DEBUG: remove dependent tiles
+        # Initial nc_sum is to neglect the "unsummed" channel normalizations
+        #tiles = (tiles[::nc_sum+1] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+        ####################
+
+        ####################
+        tiles = tf_map[:,clip_samples:-clip_samples:us_rate].T.copy()
+        sum_filter = numpy.ones(nc_sum+1)
+        # Here's the deal: we're going to keep only the valid output and it's
+        # *always* going to exist in the lowest available indices
+        for t in range(tiles.shape[0]):
+            # Sum and drop correlate tiles
+            # FIXME: don't drop correlated tiles
+            output = numpy.convolve(sum_filter, tiles[t], 'valid')[::nc_sum+1]
+            tiles[t,:len(output)] = output
+        # Invert the map to frequency - time
+        tiles = (tiles.T[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+        sys.stderr.write(" TF-plane is %dx%s samples... " % tiles.shape)
+        ####################
+
+        # FIXME: Figure this out
+        tiles *= nc_sum+1
+
+        #print tiles.std(axis=1)
+        print >>sys.stderr, " done"
+
+        #for j in range(2, 3):
+        #for j in range(2, 17):
+        print "\t\t...getting longer durations..."
+        for j in [2**l for l in xrange(1, 5)]:
+            sys.stderr.write("\t\tSumming DOF = %d ..." % j)
+
+            # FIXME: fftconvolve is way too slow on certain macines for some
+            # reason
+            #dof_tiles = fftconvolve(tiles, numpy.ones((1, j)), 'valid')
+
+            dof_tiles = tiles.copy()
+            sum_filter = numpy.ones(j)
+            for f in range(tiles.shape[0]):
+                # Sum and drop correlate tiles
+                # FIXME: don't drop correlated tiles
+                output = numpy.convolve(sum_filter, tiles[f,:], 'valid')
+                dof_tiles[f,:len(output)] = output
+
+            print >>sys.stderr, " done"
+
+            #
+            # Trigger finding
+            #
+            #print sorted(tiles.flatten())[-10:]
+
+            # Current bandwidth of the time-frequency map tiles
+            current_band = band * (nc_sum + 1)
+            # How much each "step" is in the frequency domain -- almost 
+            # assuredly the fundamental bandwidth
+            #df = band
+            df = current_band
+            # How much each "step" is in the time domain -- under sampling rate
+            dt = 1.0 / 2 / current_band
+            # Duration is fixed by the NDOF and bandwidth
+            duration = j / 2.0 / current_band
+
+            #print tiles.shape
+            #print tiles.std(axis=1)
+            #print tiles.std()
+            
+            #fap = 1e-7
+            threshold = lalburst.Chi2Threshold(j, args.tile_fap)
+            #print dt, df, threshold
+
+            window_offset_epoch = fs_data.epoch + dt_stride * window_fraction / 2 
+            trigger_list_from_map(dof_tiles, event_list, threshold, window_offset_epoch, lal_filters[0].f0 + band/2, duration, current_band, df, dt)
+
+            #if full_map.has_key(nc_sum):
+                #full_map[nc_sum] = numpy.hstack((full_map[nc_sum], tiles))
+            #else:
+                #full_map[nc_sum] = tiles
+            stat_sum[(j, nc_sum)] = tiles.sum(axis=1)
+            stat_sum_sq[(j, nc_sum)] = (tiles**2).sum(axis=1)
+
+        print "Total number of events: %d" % len(event_list)
+
+    print t_idx_min, t_idx_max
+    t_idx_min += int(ts_stride * (1 - window_fraction))
+    t_idx_max += int(ts_stride * (1 - window_fraction))
+    print t_idx_min, t_idx_max
+
+    #for dof in full_map:
+        #print "nc_sum: %d" % dof
+        #print full_map[dof].shape
+        #print full_map[dof].std(axis=1)
+        #print full_map[dof].std()#, numpy.sqrt(2*dof)
+        #print (full_map[dof]*0.65).std(axis=1)
+        #print (full_map[dof]*0.65).std()#, numpy.sqrt(2*dof*0.65)
+        #pyplot.hist(full_map[dof], label=dof)
+
+    """
+    for key in stat_sum:
+        print key
+        mean = stat_sum / tile_n
+        var = (stat_sum_sq - mean**2) / (tile_n - 1)
+    """
+
+xmldoc = ligolw.Document()
+xmldoc.appendChild(ligolw.LIGO_LW())
+
+ifo = args.channel_name.split(":")[0]
+proc_row = register_to_xmldoc(xmldoc, __program__, args.__dict__, ifos=[ifo],version=glue.git_version.id, cvs_repository=glue.git_version.branch, cvs_entry_time=glue.git_version.date)
+
+ss = append_search_summary(xmldoc, proc_row, ifos=("H1",), inseg=inseg, outseg=outseg)
+
+for sb in event_list:
+    sb.process_id = proc_row.process_id
+    sb.search = proc_row.program
+    sb.ifo, sb.channel = args.channel_name.split(":")
+
+def make_filename(ifo, seg, tag="excesspower", ext="xml.gz"):
+    if isinstance(ifo, str):
+        ifostr = ifo
+    else:
+        ifostr = "".join(ifo)
+    st_rnd, end_rnd = int(math.floor(seg[0])), int(math.ceil(seg[1]))
+    dur = end_rnd - st_rnd
+    return "%s-%s-%d-%d.%s" % (ifostr, tag, st_rnd, dur, ext)
+
+xmldoc.childNodes[0].appendChild(event_list)
+fname = make_filename("H1", inseg)
+utils.write_filename(xmldoc, fname, gz=fname.endswith("gz"), verbose=True)
