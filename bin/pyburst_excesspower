@@ -176,10 +176,9 @@ outseg = determine_output_segment(inseg, dt_stride, args.sample_rate, window_fra
 
 # Bin spacing of the PSD (and filters), lowest frequency of the first filter
 delta_f, flow = 1.0/dt_stride, 0.0
-#delta_f, flow = 1.0/dt_stride, 16.0
 
-if args.min_frequency < args.strain_high_pass:
-    print >>sys.stderr, "Warning: strain high pass frequency %f is greater than the tile minimum frequency %f --- this is likely to cause strange output below the bandpass frequency" % (args.strain_high_pass, args.min_frequency)
+#if args.min_frequency < args.strain_high_pass:
+    #print >>sys.stderr, "Warning: strain high pass frequency %f is greater than the tile minimum frequency %f --- this is likely to cause strange output below the bandpass frequency" % (args.strain_high_pass, args.min_frequency)
 
 if args.max_frequency is None:
     args.max_frequency = args.sample_rate / 2.0
@@ -437,10 +436,8 @@ while t_idx_max <= len(ts_data):
 
         print "Total number of events: %d" % len(event_list)
 
-    print t_idx_min, t_idx_max
     t_idx_min += int(ts_stride * (1 - window_fraction))
     t_idx_max += int(ts_stride * (1 - window_fraction))
-    print t_idx_min, t_idx_max
 
     #for dof in full_map:
         #print "nc_sum: %d" % dof
