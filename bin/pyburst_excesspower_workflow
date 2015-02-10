@@ -155,7 +155,7 @@ def write_offline_dag(seg, cache_file, channels, subd_intrv=3600*2, rootdir='./'
         # 
         OVERLAP_TIME = 2 # FIXME: very specific hardcoding here
         analysis_segments = {}
-        for subsegl in [shift_to_overlap(subdivide(seg, subd_intrv, subd_intrv), OVERLAP_TIME)]:
+        for subsegl in [shift_to_overlap(subdivide(seg, subd_intrv, OVERLAP_TIME), OVERLAP_TIME)]:
             for subseg in subsegl:
 
                 pnode = CondorDAGNode(ep_job)
