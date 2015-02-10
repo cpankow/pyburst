@@ -269,7 +269,6 @@ setup (
                ],
     packages = [
                'pyburst',
-               'pycbc.types',
                ],
      #package_data = {'pycbc.workflow': find_package_data('pycbc/workflow')},
 )
