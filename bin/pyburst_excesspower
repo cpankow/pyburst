@@ -101,11 +101,32 @@ def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True)
 
     return mu_sq
 
+# < s^2_j(f_1, b) > = 1 / 2 / N / \delta_t EPIP{\Theta, \Theta; P}
+def uw_sum_sq(lal_filters, spec_corr, psd):
+    return lalburst.ExcessPowerFilterInnerProduct(lal_filters[0], lal_filters[0], spec_corr, psd)
 
-def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, duration, band, df, dt):
+def uw_ratio_denom(tf_plane, lal_filters, spec_corr, psd):
+    """
+    See eqn. 62 and 63 in LIGO document T1200125.
+    """
+    uw_wide_ratio = 1
+
+    # \sum_i^{n-1} \sqrt{s_j^2(f_1, b) Z_j(f_1, b)
+    narrow_band_uw_sq_sum = 0
+    for n in range(wide_band / narrow_band):
+        narrow_band_uw_sq_sum += math.sqrt(uw_sum_sq(uw_tf_plane, lal_filters, spec_corr, psd)) # * tf_plane[]
+    narrow_band_uw_sq_um *= math.sqrt(delta_f / band)
+    uw_sum_sq = lalburst.ExcessPowerFilterInnerProduct(lal_filters[0], lal_filters[0], spec_corr, psd) # / 2 / N /delta_t
+
+def measure_hrss_poorly(tile_energy, sub_psd):
+    inverse_psd_average = numpy.average(1.0 / sub_psd)
+    return math.sqrt(tile_energy / inverse_psd_average / 2)
+
+def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, duration, band, df, dt, psd=None):
     start_time = LIGOTimeGPS(float(start_time))
     for i, j in zip(*numpy.where(tfmap > threshold)):
         event = event_list.RowType()
+
         # The points are summed forward in time and thus a `summed point' is the
         # sum of the previous N points. If this point is above threshold, it
         # corresponds to a tile which spans the previous N points. However, th
@@ -117,13 +138,25 @@ def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, 
         event.set_start(start_time + float(j * dt))
         event.set_peak(event.get_start() + duration / 2)
         event.central_freq = start_freq + i * df + 0.5 * band
+
         event.duration = duration
         event.bandwidth = band
         event.chisq_dof = 2 * duration * band
+
         event.snr = math.sqrt(tfmap[i,j] / event.chisq_dof - 1)
-        #event.snr = tfmap[i,j]
-        event.confidence = 0 # FIXME
-        event.amplitude = 0 # FIXME
+        # FIXME: Magic number 0.62 should be determine empircally
+        event.confidence = -lalburst.lnOneMinusChisqCdf(event.snr * 0.62, event.chisq_dof * 0.62)
+        if psd is not None:
+            # NOTE: I think the pycbc PSDs always start at 0 Hz --- check
+            psd_idx_min = int((event.central_freq - event.bandwidth / 2) / psd.delta_f)
+            psd_idx_max = int((event.central_freq + event.bandwidth / 2) / psd.delta_f)
+
+            # FIXME: heuristically this works better with E - D -- it's all
+            # going away with the better h_rss calculation soon anyway
+            event.amplitude = measure_hrss_poorly(tfmap[i,j] - event.chisq_dof, psd[psd_idx_min:psd_idx_max])
+        else:
+            event.amplitude = 0 # FIXME
+
         event.process_id = None
         event.event_id = event_list.get_next_id()
         event_list.append(event)
@@ -431,8 +464,11 @@ while t_idx_max <= len(ts_data):
             threshold = lalburst.Chi2Threshold(j, args.tile_fap)
             #print dt, df, threshold
 
+            # Since we clip the data, the start time needs to be adjusted 
+            # accordingly
             window_offset_epoch = fs_data.epoch + dt_stride * window_fraction / 2 
-            trigger_list_from_map(dof_tiles, event_list, threshold, window_offset_epoch, lal_filters[0].f0 + band/2, duration, current_band, df, dt)
+ 
+            trigger_list_from_map(dof_tiles, event_list, threshold, window_offset_epoch, lal_filters[0].f0 + band/2, duration, current_band, df, dt, fd_psd)
 
             #if full_map.has_key(nc_sum):
                 #full_map[nc_sum] = numpy.hstack((full_map[nc_sum], tiles))
