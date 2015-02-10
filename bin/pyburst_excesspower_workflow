@@ -1,0 +1,194 @@
+#!/usr/bin/env python 
+import os 
+import stat
+import glob
+import argparse 
+
+from glue.segments import segment, segmentlist
+from glue.pipeline import CondorDAGJob, CondorDAG, CondorDAGNode
+
+def which(prog):
+    for path in os.environ["PATH"].split(":"):
+        if any([prog == prg for prg in map(os.path.basename, [p for p in glob.glob(path + "/*") if os.stat(p).st_mode & stat.S_IXUSR])]):
+            return os.path.join(path, prog)
+
+class PyBurstEPCondorJob(CondorDAGJob, object):
+    def __init__(self, channel, sample_rate, root_dir, **kwargs):
+        super(PyBurstEPCondorJob, self).__init__(universe="vanilla", executable=which("pyburst_excesspower"))
+
+        #
+        # Default stuff
+        #
+        self.add_condor_cmd("environment", "OMP_NUM_THREADS=1")
+
+        self.full_name = channel
+        # channel specification
+        self.add_opt("channel-name", self.full_name)
+        self.instrument, self.channel = self.full_name.split(":")
+
+        self.sample_rate = sample_rate
+        self.add_opt("sample-rate", str(self.sample_rate))
+        self.min_frequency = 0
+        self.max_frequency = kwargs['max_frequency'] if kwargs.has_key('max_frequency') else sample_rate / 2.0
+
+        self.channels = 1023
+        self.add_opt("channels", str(self.channels))
+
+        self.add_opt("gps-start-time", "$(macrogpsstart)")
+        self.add_opt("gps-end-time", "$(macrogpsend)")
+
+        # FIXME: Unhardcode
+        self.frame_cache = kwargs['frame_cache']
+        self.add_opt("frame-cache", self.frame_cache)
+        #self.pad_data = kwargs['pad_data']
+        self.pad_data = 4
+        self.add_opt("pad-data", str(self.pad_data))
+        #self.strain_high_pass = kwargs['strain_high_pass']
+        self.strain_high_pass = 1
+        self.add_opt("strain-high-pass", str(self.strain_high_pass))
+        #self.psd_estimation = kwargs['psd_estimation']
+        self.psd_estimation = 'median-mean'
+        self.add_opt("psd-estimation", str(self.psd_estimation))
+        #self.psd_segment_length = kwargs['psd_segment_length']
+        self.psd_segment_length = 8
+        self.add_opt("psd-segment-length", str(self.psd_segment_length))
+        self.psd_segment_stride = self.psd_segment_length * 0.5
+        self.add_opt("psd-segment-stride", str(self.psd_segment_stride))
+
+        # Please be verbose, thank you!
+        self.add_opt("verbose", "")
+
+        self.out_log_path = None
+        self.err_log_path = None
+        self.log_path = None
+        self.iwd = os.path.abspath(root_dir)
+        self.mem_req = kwargs["mem_req"] if kwargs.has_key("mem_req") else 1024
+
+        self.add_condor_cmd("request_memory", str(self.mem_req))
+        self.add_condor_cmd("getenv", "True")
+
+    def finalize(self):
+        self.add_condor_cmd("iwd", os.path.join(self.iwd, "triggers"))
+        if not os.path.exists(self.iwd):
+            os.makedirs(self.iwd)
+
+        log_path = os.path.join(self.iwd, "logs")
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+
+        self.out_log_path = os.path.join(log_path, "%s_%s-$(Cluster).out" % (self.instrument, self.channel))
+        self.set_stdout_file(self.out_log_path)
+        self.err_log_path = os.path.join(log_path, "%s_%s-$(Cluster).err" % (self.instrument, self.channel))
+        self.set_stderr_file(self.err_log_path)
+        self.log_path = os.path.join(log_path, "%s_%s-$(Cluster).log" % (self.instrument, self.channel))
+        self.set_log_file(self.log_path)
+
+        self.sub_file = os.path.join(self.iwd, "%s_%s_submit.sub" % (self.instrument, self.channel))
+        self.set_sub_file(self.sub_file)
+        self.write_sub_file()
+
+def subdivide(seg, length, min_len=0):
+    """
+    Subdivide a segment into smaller segments based on a given length. Enforce a given minimum length at the end, if necessary. If the remainder segment is smaller than the minimum length, then the last two segments will span the remainder plus penultimate segment, with the span divided evenly between the two.
+
+    Input segment: (0, 10] subdivide 3 min 2
+    Output segment(s): (0, 3], (3, 6], (6, 8], (8, 10]
+    """
+    assert length >= min_len
+    if abs(seg) < min_len:
+        return segmentlist([])
+    if abs(seg) <= length:
+        return segmentlist([seg])
+
+    subsegl = segmentlist([])
+    for i in range(int(float(abs(seg))/length)):
+        st = seg[0]
+        subsegl.append(segment(st+length*i, st+length*(i+1)))
+
+    # Make an attempt to subdivide evenly.
+    if float(abs(seg)) % length <= min_len:
+        s1 = subsegl.pop()
+        rem_len = float(abs(s1)) + (float(abs(seg)) % length)
+        s2 = segment(seg[1]-rem_len/2, seg[1])
+        s1 = segment(s1[0], seg[1]-rem_len/2)
+        subsegl.append(s1)
+        subsegl.append(s2)
+    else:
+        subsegl.append(segment(subsegl[-1][1], seg[1]))
+
+    return subsegl
+
+def shift_to_overlap(segl, shift, skip_first=True):
+    prev_end = segl[-1][1]
+    for i, seg in enumerate(segl):
+        if i == 0 and skip_first:
+            continue
+   
+        segl[i] = segment(segl[i][0] - shift, segl[i][1])
+    return segl
+
+def write_offline_dag(seg, cache_file, channels, subd_intrv=3600*2, rootdir='./', write_script=False, write_subdags=False):
+    """
+    Write a DAG for a set of channels with segments provided through the segment list dictionary (seg_dict). subd_intrv is the interval over which segments larger than this number will be subdivded into individual jobs. Segments of time that are directly adjacent will be overlapped so as not to lose time to whitening effects.
+    """
+
+    # Expand out the cache file to ensure no relative path names
+    cache_file = os.path.abspath(cache_file)
+
+    uberdag = CondorDAG(log=rootdir)
+    #for channel, segl in seg_dict.iteritems():
+    for channel in channels:
+        print "Channel %s, full analysis segment %s" % (channel, seg)
+        chan_sanitized = channel.replace(":","_").replace("-","_")
+        subdag = CondorDAG(log=rootdir)
+
+        #
+        # Generate analysis job
+        # 
+        ep_job = PyBurstEPCondorJob(channel, 8192, "./", frame_cache=cache_file)
+        ep_job.finalize()
+
+        #
+        # Subdivide and prune segments which we simply can't analyze because 
+        # the entire segment would be thrown away due to whitener effets
+        # NOTE: This won't be a problem with a fix-psd option
+        # 
+        OVERLAP_TIME = 2 # FIXME: very specific hardcoding here
+        analysis_segments = {}
+        for subsegl in [shift_to_overlap(subdivide(seg, subd_intrv, OVERLAP_TIME), OVERLAP_TIME)]:
+            for subseg in subsegl:
+
+                pnode = CondorDAGNode(ep_job)
+                pnode.add_macro("macrogpsstart", str(int(subseg[0])))
+                pnode.add_macro("macrogpsend", str(int(subseg[1])))
+                subdag.add_node(pnode)
+                uberdag.add_node(pnode)
+                analysis_segments[subseg] = pnode
+
+        dagname = "excesspower_%s_%d_%d" % (chan_sanitized, seg[0], seg[1])
+        subdag.set_dag_file(dagname)
+        if write_subdags:
+            subdag.write_concrete_dag()
+        if write_script:
+            subdag.write_script()
+
+    return uberdag
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--gps-start-time", type=float, help="Start time of analysis.")
+parser.add_argument("--gps-end-time", type=float, help="Start time of analysis.")
+parser.add_argument("--frame-cache", dest="cache_file", help="Start time of analysis.")
+parser.add_argument("--output-name", dest="output_name", default='excesspower', help="Name of DAG to write, default is 'excesspower'")
+parser.add_argument("--write-script", dest="write_script", action="store_true", help="Write script to accompany DAG.")
+parser.add_argument("--channel", action="append", help="Make DAG for this channel.")
+args = parser.parse_args()
+
+rootdir = os.path.abspath("./")
+
+run_seg = segment(args.gps_start_time, args.gps_end_time)
+
+uberdag = write_offline_dag(run_seg, args.cache_file, args.channel)
+uberdag.set_dag_file(args.output_name)
+uberdag.write_concrete_dag()
+if args.write_script:
+    uberdag.write_script()
