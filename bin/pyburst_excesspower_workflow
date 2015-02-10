@@ -187,6 +187,9 @@ rootdir = os.path.abspath("./")
 
 run_seg = segment(args.gps_start_time, args.gps_end_time)
 
+pad_length = 4 # data padding required at the ends of each segment
+pad_length = run_seg.protract(pad_length)
+
 uberdag = write_offline_dag(run_seg, args.cache_file, args.channel)
 uberdag.set_dag_file(args.output_name)
 uberdag.write_concrete_dag()
