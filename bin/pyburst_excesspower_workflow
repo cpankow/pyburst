@@ -124,7 +124,7 @@ def shift_to_overlap(segl, shift, skip_first=True):
         if i == 0 and skip_first:
             continue
    
-        segl[i] = segment(segl[i][0] - shift, segl[i][1])
+        segl[i] = segment(segl[i][0] - shift, segl[i][1] - shift)
     return segl
 
 def write_offline_dag(seg, cache_file, channels, subd_intrv=3600*2, rootdir='./', write_script=False, write_subdags=False):
