@@ -44,6 +44,7 @@ def construct_args():
     argp.add_argument("--verbose", action="store_true", help="Be verbose")
     argp.add_argument("--min-frequency", type=float, default=0, help="Lowest frequency of the filter bank, default is 0 Hz.")
     argp.add_argument("--max-frequency", type=float, default=None, help="Highest frequency of the filter bank, default is None, meaning use Nyquist.")
+    argp.add_argument("--max-duration", type=float, default=None, help="Longest duration tile to compute.")
     argp.add_argument("--tile-bandwidth", type=float, default=None, help="Bandwidth of the finest filters. Default is None, and would be inferred from the data bandwidth and number of channels.")
     argp.add_argument("--channels", type=int, default=None, help="Number of frequency channels to use. Default is None, and would be inferred from the data bandwidth and tile bandwidth.")
     strain.insert_strain_option_group(argp)
@@ -380,10 +381,16 @@ while t_idx_max <= len(ts_data):
         #print tiles.std(axis=1)
         print >>sys.stderr, " done"
 
+        if args.max_duration is not None:
+            max_dof = 2 * args.max_duration * (band * (nc_sum+1))
+        else:
+            max_dof = 32
+        assert max_dof >= 2
+
         #for j in range(2, 3):
         #for j in range(2, 17):
         print "\t\t...getting longer durations..."
-        for j in [2**l for l in xrange(1, 5)]:
+        for j in [2**l for l in xrange(1, int(math.log(max_dof, 2))+1)]:
             sys.stderr.write("\t\tSumming DOF = %d ..." % j)
 
             # FIXME: fftconvolve is way too slow on certain macines for some
