@@ -62,7 +62,7 @@ class PyBurstEPCondorJob(CondorDAGJob, object):
         self.err_log_path = None
         self.log_path = None
         self.iwd = os.path.abspath(root_dir)
-        self.mem_req = kwargs["mem_req"] if kwargs.has_key("mem_req") else 1024
+        self.mem_req = kwargs["mem_req"] if kwargs.has_key("mem_req") else 2048
 
         self.add_condor_cmd("request_memory", str(self.mem_req))
         self.add_condor_cmd("getenv", "True")
@@ -127,7 +127,7 @@ def shift_to_overlap(segl, shift, skip_first=True):
         segl[i] = segment(segl[i][0] - shift, segl[i][1] - shift)
     return segl
 
-def write_offline_dag(seg, cache_file, channels, subd_intrv=3600*2, rootdir='./', write_script=False, write_subdags=False):
+def write_offline_dag(seg, cache_file, channels, subd_intrv=2048, rootdir='./', write_script=False, write_subdags=False):
     """
     Write a DAG for a set of channels with segments provided through the segment list dictionary (seg_dict). subd_intrv is the interval over which segments larger than this number will be subdivded into individual jobs. Segments of time that are directly adjacent will be overlapped so as not to lose time to whitening effects.
     """
