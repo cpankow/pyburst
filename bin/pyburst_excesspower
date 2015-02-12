@@ -328,9 +328,9 @@ while t_idx_max <= len(ts_data):
         # Reset filter bank series
         tmp_filter_bank *= 0.0
 
-        if args.verbose:
-            print "Filter %d: %d FD samples" % (i, len(tmp_filter_bank))
-            print "Beginning filtering %d / %d: %d" % (i, nchans, time.time() - tdiff)
+        #if args.verbose:
+            #print "Filter %d: %d FD samples" % (i, len(tmp_filter_bank))
+            #print "Beginning filtering %d / %d: %d" % (i, nchans, time.time() - tdiff)
 
         f1 = int(lal_filters[i].f0/fd_psd.delta_f)
         f2 = int((lal_filters[i].f0 + 2*band)/fd_psd.delta_f)+1
