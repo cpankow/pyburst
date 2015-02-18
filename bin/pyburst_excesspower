@@ -180,6 +180,7 @@ def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0)
 #
 # Preliminaries
 #
+numpy.random.seed(0)
 
 root = logging.getLogger()
 root.setLevel(logging.INFO)
@@ -251,15 +252,6 @@ fd_psd = psd.from_cli(args, int(8192/delta_f)/2+1, delta_f, flow, ts_data, dyn_r
 #for i in range(len(fd_psd)):
     #fd_psd[i] = 2.0/args.sample_rate
 
-#import matplotlib
-#matplotlib.use("agg")
-#from matplotlib import pyplot
-
-#pyplot.plot(fd_psd.sample_frequencies, fd_psd)
-#pyplot.loglog()
-#pyplot.savefig("psd.png")
-#exit()
-
 # FIXME: Implicitly assumes Hann window from ts_data creation
 spec_corr = calculate_spectral_correlation(args.sample_rate*8)
 # FIXME: Move to function. Since we don't window the data for whitening purposes
@@ -290,7 +282,6 @@ tf_map = numpy.zeros((nchans, ts_stride))
 stat_sum = {}
 stat_sum_sq = {}
 
-numpy.random.seed(0)
 t_idx_min, t_idx_max = 0, ts_stride
 while t_idx_max <= len(ts_data):
 
@@ -305,7 +296,6 @@ while t_idx_max <= len(ts_data):
     fs_data = types.FrequencySeries(numpy.zeros(ts_stride/2+1, dtype=numpy.complex128), delta_f=1.0/dt_stride)
 
     tmp_ts_data = types.TimeSeries(ts_data[t_idx_min:t_idx_max]*lal.CreateTukeyREAL8Window(t_idx_max-t_idx_min, window_fraction).data.data, 1.0/args.sample_rate, epoch=ts_data.start_time + float(t_idx_min)/args.sample_rate)
-    #fs_data = ts_data[t_idx_min:t_idx_max].to_frequencyseries(1.0/dt_stride)
     fs_data = tmp_ts_data.to_frequencyseries(1.0/dt_stride)
     
     #
@@ -313,6 +303,7 @@ while t_idx_max <= len(ts_data):
     #
 
     # Force planning to happen
+    # FIXME: Move this out of loop?
     tmp_filter_bank = numpy.zeros(len(fd_psd), dtype=numpy.complex128)
     filter.matched_filter_core(types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f), fs_data, h_norm=1, psd=fd_psd, low_frequency_cutoff=lal_filters[0].f0, high_frequency_cutoff=lal_filters[0].f0+2*band)
 
@@ -359,11 +350,13 @@ while t_idx_max <= len(ts_data):
         chan_sum_range = [2**l for l in xrange(0, int(math.log(nchans, 2))+1)]
 
     # Clip the boundaries to remove window corruption
-    clip_samples = dt_stride * window_fraction * args.sample_rate / 2
+    clip_samples = int(dt_stride * window_fraction * args.sample_rate / 2)
+
+    import time
+    level_tdiff = tdiff = time.time()
+    print "Beginning tile construction: %d" % int(tdiff)
 
     #from scipy.signal import fftconvolve
-    #for nc_sum in range(0, 1): # nc_sum additional channel adds
-    #for nc_sum in range(0, nchans): # nc_sum additional channel adds
     for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel adds
         # FIXME: the minus one is to undo things later
         nc_sum = 2**nc_sum - 1
@@ -440,16 +433,17 @@ while t_idx_max <= len(ts_data):
 
             print >>sys.stderr, " done"
 
+            level_tdiff = time.time() - level_tdiff
+            print "Done with this resolution, total %f" % level_tdiff
+
             #
             # Trigger finding
             #
-            #print sorted(tiles.flatten())[-10:]
 
             # Current bandwidth of the time-frequency map tiles
             current_band = band * (nc_sum + 1)
             # How much each "step" is in the frequency domain -- almost 
             # assuredly the fundamental bandwidth
-            #df = band
             df = current_band
             # How much each "step" is in the time domain -- under sampling rate
             dt = 1.0 / 2 / current_band
@@ -460,9 +454,7 @@ while t_idx_max <= len(ts_data):
             #print tiles.std(axis=1)
             #print tiles.std()
             
-            #fap = 1e-7
             threshold = lalburst.Chi2Threshold(j, args.tile_fap)
-            #print dt, df, threshold
 
             # Since we clip the data, the start time needs to be adjusted 
             # accordingly
@@ -478,6 +470,9 @@ while t_idx_max <= len(ts_data):
             stat_sum_sq[(j, nc_sum)] = (tiles**2).sum(axis=1)
 
         print "Total number of events: %d" % len(event_list)
+
+    tdiff = time.time() - tdiff
+    print "Done with this block: total %f" % tdiff
 
     t_idx_min += int(ts_stride * (1 - window_fraction))
     t_idx_max += int(ts_stride * (1 - window_fraction))
