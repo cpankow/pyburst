@@ -419,10 +419,6 @@ while t_idx_max <= len(ts_data):
         for j in [2**l for l in xrange(1, int(math.log(max_dof, 2))+1)]:
             sys.stderr.write("\t\tSumming DOF = %d ..." % j)
 
-            # FIXME: fftconvolve is way too slow on certain macines for some
-            # reason
-            #dof_tiles = fftconvolve(tiles, numpy.ones((1, j)), 'valid')
-
             tlen = tiles.shape[1] - j + 1
             dof_tiles = numpy.zeros((tiles.shape[0], tlen))
             sum_filter = numpy.ones(j)
