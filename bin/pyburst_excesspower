@@ -184,6 +184,20 @@ def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0)
     outseg = segment(outseg[0], outseg[1] - remainder)
     return outseg
 
+def make_tiles(tf_map, nc_sum, mu_sq):
+    tiles = tf_map.T.copy()
+    sum_filter = numpy.ones(nc_sum+1)
+    # Here's the deal: we're going to keep only the valid output and
+    # it's *always* going to exist in the lowest available indices
+    for t in range(tiles.shape[0]):
+        # Sum and drop correlate tiles
+        # FIXME: don't drop correlated tiles
+        output = numpy.convolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
+        #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
+        tiles[t,:len(output)] = output
+    # Invert the map to frequency - time
+    return (tiles.T[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+
 #
 # Preliminaries
 #
@@ -380,32 +394,10 @@ while t_idx_max <= len(ts_data):
 
         mu_sq = mu_sq_dict[nc_sum]
 
-        #print tf_map[:,::us_rate].std(axis=1)
         sys.stderr.write("\t...calculating tiles...")
 
         ####################
-        # FIXME: This works, but seems to be slover than 1d convolution
-        #tiles = fftconvolve(tf_map[:,clip_samples:-clip_samples:us_rate], numpy.ones((nc_sum+1, 1)), 'valid')
-
-        #print tiles.std(axis=1)
-        # DEBUG: remove dependent tiles
-        # Initial nc_sum is to neglect the "unsummed" channel normalizations
-        #tiles = (tiles[::nc_sum+1] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
-        ####################
-
-        ####################
-        tiles = tf_map[:,clip_samples:-clip_samples:us_rate].T.copy()
-        sum_filter = numpy.ones(nc_sum+1)
-        # Here's the deal: we're going to keep only the valid output and it's
-        # *always* going to exist in the lowest available indices
-        for t in range(tiles.shape[0]):
-            # Sum and drop correlate tiles
-            # FIXME: don't drop correlated tiles
-            output = numpy.convolve(sum_filter, tiles[t], 'valid')[::nc_sum+1]
-            #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
-            tiles[t,:len(output)] = output
-        # Invert the map to frequency - time
-        tiles = (tiles.T[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+        tiles = make_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
         sys.stderr.write(" TF-plane is %dx%s samples... " % tiles.shape)
         ####################
 
