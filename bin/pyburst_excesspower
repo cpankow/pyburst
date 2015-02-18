@@ -185,18 +185,18 @@ def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0)
     return outseg
 
 def make_tiles(tf_map, nc_sum, mu_sq):
-    tiles = tf_map.T.copy()
+    tiles = tf_map.copy()
     sum_filter = numpy.ones(nc_sum+1)
     # Here's the deal: we're going to keep only the valid output and
     # it's *always* going to exist in the lowest available indices
-    for t in range(tiles.shape[0]):
+    for t in range(tiles.shape[1]):
         # Sum and drop correlate tiles
         # FIXME: don't drop correlated tiles
-        output = numpy.convolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
+        output = numpy.convolve(tiles[:,t], sum_filter, 'valid')[::nc_sum+1]
         #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
-        tiles[t,:len(output)] = output
+        tiles[:len(output),t] = output
     # Invert the map to frequency - time
-    return (tiles.T[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+    return (tiles[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
 
 #
 # Preliminaries
