@@ -120,11 +120,16 @@ def uw_ratio_denom(tf_plane, lal_filters, spec_corr, psd):
     uw_sum_sq = lalburst.ExcessPowerFilterInnerProduct(lal_filters[0], lal_filters[0], spec_corr, psd) # / 2 / N /delta_t
 
 def measure_hrss_poorly(tile_energy, sub_psd):
-    inverse_psd_average = numpy.average(1.0 / sub_psd)
-    return math.sqrt(tile_energy / inverse_psd_average / 2)
+    return math.sqrt(tile_energy / numpy.average(1.0 / sub_psd) / 2)
 
 def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, duration, band, df, dt, psd=None):
+
+    if psd is not None:
+        npy_psd = psd.numpy()
+
     start_time = LIGOTimeGPS(float(start_time))
+    ndof = 2 * duration * band
+
     for i, j in zip(*numpy.where(tfmap > threshold)):
         event = event_list.RowType()
 
@@ -142,7 +147,7 @@ def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, 
 
         event.duration = duration
         event.bandwidth = band
-        event.chisq_dof = 2 * duration * band
+        event.chisq_dof = ndof
 
         event.snr = math.sqrt(tfmap[i,j] / event.chisq_dof - 1)
         # FIXME: Magic number 0.62 should be determine empircally
@@ -154,7 +159,7 @@ def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, 
 
             # FIXME: heuristically this works better with E - D -- it's all
             # going away with the better h_rss calculation soon anyway
-            event.amplitude = measure_hrss_poorly(tfmap[i,j] - event.chisq_dof, psd[psd_idx_min:psd_idx_max])
+            event.amplitude = measure_hrss_poorly(tfmap[i,j] - event.chisq_dof, npy_psd[psd_idx_min:psd_idx_max])
         else:
             event.amplitude = 0 # FIXME
 
