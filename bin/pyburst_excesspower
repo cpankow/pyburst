@@ -24,6 +24,7 @@ from argparse import ArgumentParser
 import numpy
 
 from glue.ligolw import lsctables, utils, ligolw
+lsctables.use_in(ligolw.LIGOLWContentHandler)
 from glue.lal import LIGOTimeGPS
 
 import glue
@@ -517,4 +518,4 @@ def make_filename(ifo, seg, tag="excesspower", ext="xml.gz"):
 
 xmldoc.childNodes[0].appendChild(event_list)
 fname = make_filename("H1", inseg)
-utils.write_filename(xmldoc, fname, gz=fname.endswith("gz"), verbose=True)
+utils.write_filename(xmldoc, fname, gz=fname.endswith("gz"), verbose=True, contenthandler=ligolw.LIGOLWContentHandler)
