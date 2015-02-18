@@ -124,6 +124,7 @@ def measure_hrss_poorly(tile_energy, sub_psd):
 
 def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, duration, band, df, dt, psd=None):
 
+    # FIXME: If we don't convert this the calculation takes forever --- but we should convert it once and handle deltaF better later
     if psd is not None:
         npy_psd = psd.numpy()
 
@@ -362,7 +363,7 @@ while t_idx_max <= len(ts_data):
     level_tdiff = tdiff = time.time()
     print "Beginning tile construction: %d" % int(tdiff)
 
-    #from scipy.signal import fftconvolve
+    from scipy.signal import fftconvolve
     for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel adds
         # FIXME: the minus one is to undo things later
         nc_sum = 2**nc_sum - 1
@@ -384,7 +385,7 @@ while t_idx_max <= len(ts_data):
 
         ####################
         # FIXME: This works, but seems to be slover than 1d convolution
-        #tiles = fftconvolve(tf_map[:,::us_rate], numpy.ones((nc_sum+1, 1)), 'valid')
+        #tiles = fftconvolve(tf_map[:,clip_samples:-clip_samples:us_rate], numpy.ones((nc_sum+1, 1)), 'valid')
 
         #print tiles.std(axis=1)
         # DEBUG: remove dependent tiles
@@ -401,6 +402,7 @@ while t_idx_max <= len(ts_data):
             # Sum and drop correlate tiles
             # FIXME: don't drop correlated tiles
             output = numpy.convolve(sum_filter, tiles[t], 'valid')[::nc_sum+1]
+            #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
             tiles[t,:len(output)] = output
         # Invert the map to frequency - time
         tiles = (tiles.T[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
@@ -429,18 +431,19 @@ while t_idx_max <= len(ts_data):
             # reason
             #dof_tiles = fftconvolve(tiles, numpy.ones((1, j)), 'valid')
 
-            dof_tiles = tiles.copy()
+            tlen = tiles.shape[1] - j + 1
+            dof_tiles = numpy.zeros((tiles.shape[0], tlen))
             sum_filter = numpy.ones(j)
             for f in range(tiles.shape[0]):
                 # Sum and drop correlate tiles
                 # FIXME: don't drop correlated tiles
-                output = numpy.convolve(sum_filter, tiles[f,:], 'valid')
-                dof_tiles[f,:len(output)] = output
+                #output = numpy.convolve(tiles[f,:], sum_filter, 'valid')
+                dof_tiles[f] = fftconvolve(tiles[f], sum_filter, 'valid')
 
             print >>sys.stderr, " done"
 
-            level_tdiff = time.time() - level_tdiff
-            print "Done with this resolution, total %f" % level_tdiff
+            level_tdiff = time.time() - tdiff
+            print >>sys.stderr, "Done with this resolution, total %f" % level_tdiff
 
             #
             # Trigger finding
@@ -472,10 +475,10 @@ while t_idx_max <= len(ts_data):
                 #full_map[nc_sum] = numpy.hstack((full_map[nc_sum], tiles))
             #else:
                 #full_map[nc_sum] = tiles
-            stat_sum[(j, nc_sum)] = tiles.sum(axis=1)
-            stat_sum_sq[(j, nc_sum)] = (tiles**2).sum(axis=1)
+            #stat_sum[(j, nc_sum)] = tiles.sum(axis=1)
+            #stat_sum_sq[(j, nc_sum)] = (tiles**2).sum(axis=1)
 
-        print "Total number of events: %d" % len(event_list)
+            print "Total number of events: %d" % len(event_list)
 
     tdiff = time.time() - tdiff
     print "Done with this block: total %f" % tdiff
