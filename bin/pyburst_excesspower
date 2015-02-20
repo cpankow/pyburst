@@ -231,7 +231,7 @@ window_fraction = 0.25
 outseg = determine_output_segment(inseg, dt_stride, args.sample_rate, window_fraction)
 
 # Bin spacing of the PSD (and filters), lowest frequency of the first filter
-delta_f, flow = 1.0/dt_stride, 0.0
+delta_f, flow = 1.0/dt_stride, 2.0
 
 #if args.min_frequency < args.strain_high_pass:
     #print >>sys.stderr, "Warning: strain high pass frequency %f is greater than the tile minimum frequency %f --- this is likely to cause strange output below the bandpass frequency" % (args.strain_high_pass, args.min_frequency)
@@ -258,7 +258,7 @@ band = 4.0 # Hz
 # Number of channels
 nchans = args.sample_rate / 2 / band - 1
 #nchans = 64
-nchans = 1023
+nchans = 1022
 
 event_list = lsctables.New(lsctables.SnglBurstTable, ['start_time', 'start_time_ns', 'peak_time', 'peak_time_ns', 'duration', 'bandwidth', 'central_freq', 'chisq_dof', 'confidence', 'snr', 'amplitude', 'channel', 'ifo', 'process_id', 'event_id', 'search'])
 
@@ -373,21 +373,21 @@ while t_idx_max <= len(ts_data):
     # Clip the boundaries to remove window corruption
     clip_samples = int(dt_stride * window_fraction * args.sample_rate / 2)
 
+    # FIXME: What to do here?
+    # Okay, what I mean is, if the us rate is not an integer multiple
+    # This would invoke a resampling, likely
+    us_rate = int(1.0 / (2 * band*(nc_sum+1) * ts_data.delta_t)) # FIXME: x2 ?
+
     import time
     level_tdiff = tdiff = time.time()
     print "Beginning tile construction: %d" % int(tdiff)
 
     from scipy.signal import fftconvolve
-    for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel adds
+    for nc_sum in range(0, int(math.log(nchans, 2)))[::-1]: # nc_sum additional channel adds
         # FIXME: the minus one is to undo things later
         nc_sum = 2**nc_sum - 1
         print "Summing %d narrow band channels" % (nc_sum+1)
     
-        # FIXME: What to do here?
-        # Okay, what I mean is, if the us rate is not an integer multiple
-        # This would invoke a resampling, likely
-        us_rate = int(1.0 / (2 * band*(nc_sum+1) * ts_data.delta_t)) # FIXME: x2 ?
-
         #
         # Construct virtual channels
         #
