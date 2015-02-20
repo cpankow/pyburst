@@ -391,6 +391,7 @@ while t_idx_max <= len(ts_data):
         # Okay, what I mean is, if the us rate is not an integer multiple
         # This would invoke a resampling, likely
         us_rate = int(1.0 / (2 * band*(nc_sum+1) * ts_data.delta_t)) # FIXME: x2 ?
+        print >>sys.stderr, "Undersampling rate for this level: %f" % us_rate
 
         mu_sq = mu_sq_dict[nc_sum]
 
