@@ -48,6 +48,8 @@ def construct_args():
     argp.add_argument("--max-duration", type=float, default=None, help="Longest duration tile to compute.")
     argp.add_argument("--tile-bandwidth", type=float, default=None, help="Bandwidth of the finest filters. Default is None, and would be inferred from the data bandwidth and number of channels.")
     argp.add_argument("--channels", type=int, default=None, help="Number of frequency channels to use. Default is None, and would be inferred from the data bandwidth and tile bandwidth.")
+    argp.add_argument("--analysis-start-time", type=int, default=None, help="Start analysis from this GPS time instead of the --gps-start-time")
+    argp.add_argument("--analysis-end-time", type=int, default=None, help="End analysis at this GPS time instead of the --gps-end-time")
     strain.insert_strain_option_group(argp)
     psd.insert_psd_option_group(argp)
     return argp
@@ -213,7 +215,7 @@ args = argp.parse_args()
 # Time - frequency settings
 #
 
-inseg = segment(LIGOTimeGPS(args.gps_start_time), LIGOTimeGPS(args.gps_end_time))
+inseg = segment(LIGOTimeGPS(args.analysis_start_time or args.gps_start_time), LIGOTimeGPS(args.analysis_end_time or args.gps_end_time))
 
 # How long to process in a block of data?
 dt_stride = 8
@@ -304,7 +306,21 @@ stat_sum = {}
 stat_sum_sq = {}
 
 t_idx_min, t_idx_max = 0, ts_stride
-while t_idx_max <= len(ts_data):
+if args.analysis_start_time is not None:
+    t_idx_off = args.analysis_start_time - ts_data.start_time
+    t_idx_off = int(t_idx_off * args.sample_rate)
+else:
+    t_idx_off = 0
+t_idx_min += t_idx_off
+t_idx_max += t_idx_off
+
+if args.analysis_start_time is not None:
+    t_idx_max_off = args.analysis_end_time - ts_data.start_time
+    t_idx_max_off = int(t_idx_max_off * args.sample_rate)
+else:
+    t_idx_max_off = len(ts_data)
+
+while t_idx_max <= t_idx_max_off:
 
     print "Analyzing block %10.9f" % (ts_data.start_time + t_idx_min/float(args.sample_rate))
 
