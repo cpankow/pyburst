@@ -406,8 +406,14 @@ while t_idx_max <= t_idx_max_off:
         # FIXME: What to do here?
         # Okay, what I mean is, if the us rate is not an integer multiple
         # This would invoke a resampling, likely
-        us_rate = int(1.0 / (2 * band*(nc_sum+1) * ts_data.delta_t)) # FIXME: x2 ?
-        print >>sys.stderr, "Undersampling rate for this level: %f" % us_rate
+        #
+        # By way of explanation: this is one over the twice the *full* bandwidth
+        # e.g. the full amount of frequency content covered by the virtual
+        # filter. This is a rate in Hz, and we need the number of samples to
+        # skip in the time series for numpy, so this is multiplied by delta_t to
+        # get a sample number
+        us_rate = int(1.0 / (2 * 2 * band*(nc_sum+1) * ts_data.delta_t))
+        print >>sys.stderr, "Undersampling rate for this level: %f" % (args.sample_rate/us_rate)
 
         mu_sq = mu_sq_dict[nc_sum]
 
