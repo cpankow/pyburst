@@ -79,7 +79,7 @@ def create_filter_bank(delta_f, flow, band, nchan, psd, spec_corr):
         #ts = types.FrequencySeries(lal_filter.data.data, delta_f=lal_filter.deltaF, copy=False).to_timeseries(1.0/8192)
         #print numpy.sqrt(sum(ts**2))/32.0
 
-        filter_fseries[i,:] = lal_filter.data.data*numpy.sqrt(32)
+        filter_fseries[i,:] = lal_filter.data.data
         lal_filters.append(lal_filter)
     return filter_fseries, lal_filters
 
@@ -97,7 +97,7 @@ def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True)
     #for n in xrange(nc_sum, nchans): # channel position index
     for n in xrange(nc_sum, nchans, nc_sum+1): # channel position index
         for k in xrange(0, nc_sum): # channel sum index
-            mu_sq[n] += lalburst.ExcessPowerFilterInnerProduct(lal_filters[n-k], lal_filters[n-1-k], spec_corr, None)
+            mu_sq[n] += 2*lalburst.ExcessPowerFilterInnerProduct(lal_filters[n-k], lal_filters[n-1-k], spec_corr, None)
     #print mu_sq[nc_sum::nc_sum+1]
     if verbose:
         print " done."
@@ -187,18 +187,18 @@ def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0)
     return outseg
 
 def make_tiles(tf_map, nc_sum, mu_sq):
-    tiles = tf_map.copy()
+    tiles = numpy.zeros(tf_map.shape)
     sum_filter = numpy.ones(nc_sum+1)
     # Here's the deal: we're going to keep only the valid output and
     # it's *always* going to exist in the lowest available indices
-    for t in range(tiles.shape[1]):
+    for t in range(tf_map.shape[1]):
         # Sum and drop correlate tiles
         # FIXME: don't drop correlated tiles
-        output = numpy.convolve(tiles[:,t], sum_filter, 'valid')[::nc_sum+1]
+        output = numpy.convolve(tf_map[:,t], sum_filter, 'valid')[::nc_sum+1]
         #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
-        tiles[:len(output),t] = output
-    # Invert the map to frequency - time
-    return (tiles[:len(output)] / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1))**2
+        # \sqrt(2) for two independent complex degrees of freedom
+        tiles[:len(output),t] = numpy.absolute(output) / math.sqrt(2)
+    return tiles[:len(output)]**2 / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1)
 
 #
 # Preliminaries
@@ -298,7 +298,7 @@ for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel ad
 # Convert to TF plane
 #
 
-tf_map = numpy.zeros((nchans, ts_stride))
+tf_map = numpy.zeros((nchans, ts_stride), dtype=numpy.complex128)
 
 #full_map = dict()
 
@@ -368,11 +368,11 @@ while t_idx_max <= t_idx_max_off:
             types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f, copy=False), 
             fs_data, 
             h_norm=None, 
-            psd=None, 
+            psd=None,
             low_frequency_cutoff=lal_filters[i].f0, 
             high_frequency_cutoff=lal_filters[i].f0+2*band)
 
-        tf_map[i,:] = filtered_series[0].numpy().real
+        tf_map[i,:] = filtered_series[0].numpy()
 
     tdiff = time.time() - tdiff
     print "Done filtering: %d, total %f" % (int(time.time()), tdiff)
@@ -418,16 +418,10 @@ while t_idx_max <= t_idx_max_off:
         mu_sq = mu_sq_dict[nc_sum]
 
         sys.stderr.write("\t...calculating tiles...")
-
-        ####################
         tiles = make_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
+
         sys.stderr.write(" TF-plane is %dx%s samples... " % tiles.shape)
-        ####################
 
-        # FIXME: Figure this out
-        tiles *= nc_sum+1
-
-        #print tiles.std(axis=1)
         print >>sys.stderr, " done"
 
         if args.max_duration is not None:
