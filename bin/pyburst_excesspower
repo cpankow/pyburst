@@ -112,30 +112,30 @@ def uw_sum_sq(filter1, filter2, spec_corr, psd):
 def measure_hrss(z_j_b, lal_filters, spec_corr, psd, delta_t, dof):
     """
     Approximation of unwhitened sum of squares signal energy in a given EP tile. See T1200125 for equation number reference.
-    """
+    """ 
+    # FIXME: Make sure you sum in time correctly
     # Number of finest bands in given tile
     nb = len(z_j_b)
     # eqn. 56 -- unwhitened mean square of filter with itself
-    uw_ss_ii = uw_sum_sq(lal_filters[0], lal_filters[0], spec_corr, psd)
-    # eqn. 59 --approximation of unwhitened signal energy time series
-    s_j_b = z_j_b * numpy.sqrt(uw_ss_ii / len(lal_filters[0].data))
+    uw_ss_ii = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i], spec_corr, psd) for i in range(nb))])
     # eqn. 57 -- unwhitened mean square of filter with adjacent filter
     uw_ss_ij = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i+1], spec_corr, psd) for i in range(nb-1))])
     # unwhitened sum of squares of wide virtual filter
-    s_j_nb_avg = uw_ss_ii + sum(us_ss_ij)
+    s_j_nb_avg = uw_ss_ii + 2 * us_ss_ij.sum()
 
     # eqn. 61
     s_j_nb_denom = s_j_nb_avg.sum() + 2 / len(lal_filters[0]) *
-        numpy.array([uw_ss_ii[i] * uw_ss_ii[i+1] * uw_ip_cross for i, uw_ip_cross in enerumate(uw_ss_ij)])
+        (uw_ss_ii[:-1] * uw_ss_ii[1:] * uw_ss_ij).sum()
 
     # eqn. 62
     uw_ups_ratio = s_j_nb_avg / s_j_nb_denom
 
-    # eqn. 63
-    s_j_nb = s_j_b.sum() * uw_ups_ratio / len(lal_filters[0]) 
-    # eqn. 64
-    # check sqrt
-    return math.sqrt(s_j_nb * delta_t - s_j_nb_avg * dot * delta_t)
+    # eqn. 63 -- approximation of unwhitened signal energy time series
+    s_j_nb = z_j_b * numpy.sqrt(uw_ss_ii)
+    s_j_nb *= math.sqrt(uw_ups_ratio / len(lal_filters[0])) 
+    # eqn. 64 -- approximate unwhitened signal energy minus noise contribution
+    # FIXME: correct axis of summation?
+    return math.sqrt(numpy.absolute(s_j_nb.sum(axis=0))**2.sum() * delta_t - s_j_nb_avg * dot * delta_t)
 
 def measure_hrss_poorly(tile_energy, sub_psd):
     return math.sqrt(tile_energy / numpy.average(1.0 / sub_psd) / 2)
