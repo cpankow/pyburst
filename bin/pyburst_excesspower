@@ -186,19 +186,42 @@ def determine_output_segment(inseg, dt_stride, sample_rate, window_fraction=0.0)
     outseg = segment(outseg[0], outseg[1] - remainder)
     return outseg
 
+sq_rt_2 = math.sqrt(2)
 def make_tiles(tf_map, nc_sum, mu_sq):
     tiles = numpy.zeros(tf_map.shape)
     sum_filter = numpy.ones(nc_sum+1)
     # Here's the deal: we're going to keep only the valid output and
     # it's *always* going to exist in the lowest available indices
-    for t in range(tf_map.shape[1]):
+    for t in xrange(tf_map.shape[1]):
         # Sum and drop correlate tiles
         # FIXME: don't drop correlated tiles
         output = numpy.convolve(tf_map[:,t], sum_filter, 'valid')[::nc_sum+1]
-        #output = fftconvolve(tiles[t], sum_filter, 'valid')[::nc_sum+1]
+        #output = fftconvolve(tf_map[:,t], sum_filter, 'valid')[::nc_sum+1]
         # \sqrt(2) for two independent complex degrees of freedom
-        tiles[:len(output),t] = numpy.absolute(output) / math.sqrt(2)
+        tiles[:len(output),t] = numpy.absolute(output) / sq_rt_2
     return tiles[:len(output)]**2 / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1)
+
+#
+# Optimization plan: If we keep the summed complex TF plane in known indices, we can save ourselves individual
+# sums at wider frequency resolutions.
+# Caveats:
+#   1.  We have to keep track of where we're storing things
+#   2.  We have to do it from the finest resolution (for *all* t0s) and work our way up
+#
+# In the end, I think this is a Haar wavelet transform. Look into it
+#
+def make_indp_tiles(tf_map, nc_sum, mu_sq):
+    """
+    Create a time frequency map with resolution of tf_map binning divided by nc_sum + 1. All tiles will be independent up to overlap from the original tiling. The mu_sq is applied to the resulting addition to normalize the outputs to be zero-mean unit-variance Gaussian variables (if the input is Gaussian).
+    """
+    tiles = tf_map.copy()
+    # Here's the deal: we're going to keep only the valid output and
+    # it's *always* going to exist in the lowest available indices
+    stride = nc_sum + 1
+    for i in xrange(tiles.shape[0]/stride):
+        numpy.absolute(tiles[stride*i:stride*(i+1)].sum(axis=0), tiles[stride*(i+1)-1]) 
+    # 2 for two independent complex degrees of freedom
+    return tiles[nc_sum::nc_sum+1].real**2 / (mu_sq[nc_sum::nc_sum+1].reshape(-1, 1) * 2)
 
 #
 # Preliminaries
@@ -418,8 +441,7 @@ while t_idx_max <= t_idx_max_off:
         mu_sq = mu_sq_dict[nc_sum]
 
         sys.stderr.write("\t...calculating tiles...")
-        tiles = make_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
-
+        tiles = make_indp_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
         sys.stderr.write(" TF-plane is %dx%s samples... " % tiles.shape)
 
         print >>sys.stderr, " done"
