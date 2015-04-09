@@ -213,7 +213,6 @@ def make_tiles(tf_map, nc_sum, mu_sq):
         # FIXME: don't drop correlated tiles
         output = numpy.convolve(tf_map[:,t], sum_filter, 'valid')[::nc_sum+1]
         #output = fftconvolve(tf_map[:,t], sum_filter, 'valid')[::nc_sum+1]
-        # \sqrt(2) for two independent complex degrees of freedom
         tiles[:len(output),t] = numpy.absolute(output) / sq_rt_2
     return tiles[:len(output)]**2 / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1)
 
@@ -236,8 +235,9 @@ def make_indp_tiles(tf_map, nc_sum, mu_sq):
     stride = nc_sum + 1
     for i in xrange(tiles.shape[0]/stride):
         numpy.absolute(tiles[stride*i:stride*(i+1)].sum(axis=0), tiles[stride*(i+1)-1]) 
-    # 2 for two independent complex degrees of freedom
-    return tiles[nc_sum::nc_sum+1].real**2 / (mu_sq[nc_sum::nc_sum+1].reshape(-1, 1) * 2)
+
+    # Do the proper normalization
+    return tiles[nc_sum::nc_sum+1].real**2 / mu_sq[nc_sum::nc_sum+1].reshape(-1, 1)
 
 #
 # Preliminaries
@@ -401,7 +401,8 @@ while t_idx_max <= t_idx_max_off:
 
         f1 = int(lal_filters[i].f0/fd_psd.delta_f)
         f2 = int((lal_filters[i].f0 + 2*band)/fd_psd.delta_f)+1
-        tmp_filter_bank[f1:f2] = filter_bank[i]
+        # FIXME: why sqrt(2)?
+        tmp_filter_bank[f1:f2] = filter_bank[i] * 2
 
         filtered_series = filter.matched_filter_core(
             types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f, copy=False), 
@@ -435,6 +436,7 @@ while t_idx_max <= t_idx_max_off:
     from scipy.signal import fftconvolve
     for nc_sum in range(0, int(math.log(nchans, 2)))[::-1]: # nc_sum additional channel adds
         # FIXME: the minus one is to undo things later
+        #k = nc_sum
         nc_sum = 2**nc_sum - 1
         print "Summing %d narrow band channels" % (nc_sum+1)
     
