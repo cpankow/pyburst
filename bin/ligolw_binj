@@ -31,6 +31,7 @@ from glue.lal import LIGOTimeGPS as GPS
 from glue.ligolw.utils import process
 from pylal.antenna import response
 
+import lal
 import lalburst
 import lalsimulation
 
@@ -80,6 +81,19 @@ def write_burst_mdc_log(fname, rows):
     for row in rows:
         print >>f, row
     f.close()
+
+def measure_egw_rsq(row, rate=16384.0):
+    """
+    Measure the energy emitted in gravitational waves divided by the distance squared in M_solar / pc^2. This is accomplished by generating the burst and calling the SWIG wrapped  XLALMeasureHrss in lalsimulation. Thus, the row object should be a SWIG wrapped SimBurst object. Rate is the sampling rate in Hz (default is 16kHz).
+    """
+    swig_row = lalburst.CreateSimBurst()
+    for a in lsctables.SimBurstTable.validcolumns.keys():
+        try:
+            setattr(swig_row, a, getattr( row, a ))
+        except AttributeError: continue # we didn't define it
+        except TypeError: continue # the structure is different than the TableRow
+    hp, hx = lalburst.GenerateSimBurst(swig_row, 1.0/rate)
+    return lalsimulation.MeasureEoverRsquared(hp, hx)
 
 def measure_hrss(row, rate=16384.0):
     """
@@ -135,6 +149,27 @@ def uniform_interval(interval, num):
     """
     return (interval[1] - interval[0]) * random.random_sample(num) + interval[0]
 
+# FIXME: Just use the SimBurstUtils version when it becomes mainline
+def add_numrel_data(xmldoc):
+    # add columns if required
+    add_numrel_data_to_table(lsctables.SimBurstTable.get_table(xmldoc))
+
+def add_numrel_data_to_table(sim_burst_table):
+    added = False
+    try:
+        sim_burst_table.getColumnByName("numrel_data")
+    except KeyError:
+        sim_burst_table.appendColumn("numrel_data")
+        added = True
+
+    if not added:
+        # didn't add any columns, so don't muck their contents
+        return
+
+    # column was added, initialize
+    for row in sim_burst_table:
+        row.numrel_data = ""
+
 # FIXME: Make different injection sources subclass this
 class source(object):
     """
@@ -147,9 +182,12 @@ class source(object):
         SineGaussian: q, frequency, hrss
         StringCusp: frequency, amplitude
         Impulse: hrss
-        BTLWNB: duration, bandwidth, frequency, egw, distance
+        BTLWNB: duration, bandwidth, frequency, egw/hrss, distance
+        adhoc: hrss, filepath
         """
         self.waveform = waveform
+        self.wnb_use_hrss = kwargs["wnb_use_hrss"] if kwargs.has_key("wnb_use_hrss") else False
+        self.numrel_data = ""
         if waveform == "SineGaussian":
             if not kwargs.has_key("q") or not kwargs.has_key("frequency") or not kwargs.has_key("hrss"):
                 raise ValueError("SineGaussian distribution requires a range of q and f.")
@@ -167,11 +205,19 @@ class source(object):
             self.b_range = kwargs["bandwidth"]
             self.d_range = kwargs["duration"]
             self.f_range = kwargs["frequency"]
-            self.egw_range = kwargs["egw"]
+            if self.wnb_use_hrss:
+                self.h_range = kwargs["hrss"]
+            else:
+                self.egw_range = kwargs["egw"]
         elif waveform == "Impulse":
             if not kwargs.has_key("hrss"):
                 raise ValueError("Impulse distribution requires a range of amplitude.")
             self.h_range = kwargs["hrss"]
+        elif kwargs.has_key("filepath"):
+            if not kwargs.has_key("hrss"):
+                raise ValueError("Ad-hoc distribution requires a range of amplitude.")
+            self.h_range = kwargs["hrss"]
+            self.numrel_data = kwargs["filepath"]
         else:
             raise ValueError("Unknown waveform family %s." % waveform)
 
@@ -281,10 +327,16 @@ class source(object):
         else:
             f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
 
-        if type(self.egw_range) == segment:
-            e = self.log_egw()
+        if self.wnb_use_hrss:
+            if type(self.h_range) == segment:
+                e = self.log_hrss()
+            elif self.h_range is not None:
+                e = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum))
         else:
-            e = map(lambda i: self.egw_range[i], random.randint(0, len(self.egw_range), self.expnum))
+            if type(self.egw_range) == segment:
+                e = self.log_egw()
+            elif self.egw_range is not None:
+                e = map(lambda i: self.egw_range[i], random.randint(0, len(self.egw_range), self.expnum))
 
         return b, d, f, e
 
@@ -316,7 +368,7 @@ general_section = OptionGroup(parser, "General", "This group controls the genera
 general_section.add_option("--gps-start-time", metavar = "seconds", type = "int", help = "Set the start time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
 general_section.add_option("--gps-end-time", metavar = "seconds", type = "int", help = "Set the end time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
 general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, StringCusp, BTLWNB, and Impulse.")
-general_section.add_option("--output", metavar = "filename", help = "Set the name of the LIGO light-weight XML file to output")
+general_section.add_option("--output", metavar = "filename", default="binj.xml.gz", help = "Set the name of the LIGO light-weight XML file to output")
 general_section.add_option("--seed", metavar = "int", type = "int", default = 1, help = "set the random seed default = 1")
 general_section.add_option("--time-slide-id", metavar= "int", type = "int", default = 0, help = "Use the time slide id, default is 0.")
 general_section.add_option("--write-mdc-log", metavar = "str", help = "Write a BurstMDC log to this file compatible with the XML output.")
@@ -326,6 +378,13 @@ general_section.add_option("--event-time-type", metavar = "type", default = "ran
 general_section.add_option("--event-rate", metavar = "events / yr", type = "float", default = 1, help = "Rate of events in 1/yr, default = 1")
 general_section.add_option("--jitter", metavar = "s", type = "float", default = 0.0, help = "Window around event to add a random 'jitter' to the event time. Default is zero. Only applies to event-time-type='fixed'.")
 parser.add_option_group(general_section)
+
+adhoc_section = OptionGroup(parser, "File based ad-hoc injection options", "This group controls the distribution of file based 'ad-hoc' injections.")
+adhoc_section.add_option("--adhoc-fix-hrss", metavar = "strain", type = "float", action="append", help = "Fix the hrss value of the ad-hoc injections. Give several times with different values to build up an array of hrss to choose from. Overrides min and max options.")
+adhoc_section.add_option("--adhoc-min-hrss", metavar = "strain", type = "float", help = "Fix the min hrss value of the ad-hoc injections.")
+adhoc_section.add_option("--adhoc-max-hrss", metavar = "strain", type = "float", help = "Fix the max hrss value of the ad-hoc injections.")
+adhoc_section.add_option("--adhoc-file-location", metavar = "path", action="append", help = "File paths to ad-hoc injections. Specify as 'family name'='path'.")
+parser.add_option_group(adhoc_section)
 
 sg_section = OptionGroup(parser, "SineGaussian options", "This group controls the distribution of SineGaussian injections.")
 sg_section.add_option("--sg-fix-hrss", metavar = "strain", type = "float", action="append", help = "Fix the hrss value of the SineGaussian injections. Give several times with different values to build up an array of hrss to choose from. Overrides min and max options.")
@@ -345,6 +404,9 @@ wnb_section.add_option("--wnb-max-dist", metavar = "Mpc", default = 1.0, type = 
 wnb_section.add_option("--wnb-fix-egw", metavar = "M_s", type = "float", action="append", help = "Fix the energy (in solar masses with c=1) value of the BTLWNB injections. Give several times with different values to build up an array of energies to choose from. Overrides min and max options.")
 wnb_section.add_option("--wnb-min-egw", metavar = "M_s", type = "float", help = "Fix the min energy value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-max-egw", metavar = "M_s", type = "float", help = "Fix the max energy value of the BTLWNB injections.")
+wnb_section.add_option("--wnb-fix-hrss", metavar = "strain", type = "float", action="append", help = "Fix the hrss value of the BTLWNB injections. Give several times with different values to build up an array of hrss to choose from. Overrides min and max options.")
+wnb_section.add_option("--wnb-min-hrss", metavar = "strain", type = "float", help = "Fix the min hrss value of the BTLWNB injections.")
+wnb_section.add_option("--wnb-max-hrss", metavar = "strain", type = "float", help = "Fix the max hrss value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-fix-bandwidth", metavar = "Hz", type = "float", action="append", help = "Fix the bandwidth value of the BTLWNB injections. Give several times with different values to build up an array of bandwidths to choose from. Overrides min and max options.")
 wnb_section.add_option("--wnb-min-bandwidth", metavar = "Hz", type = "float", help = "Fix the min bandwidth value of the BTLWNB injections.")
 wnb_section.add_option("--wnb-max-bandwidth", metavar = "Hz", type = "float", help = "Fix the max bandwidth value of the BTLWNB injections.")
@@ -385,14 +447,39 @@ xmldoc = ligolw.Document()
 lw = xmldoc.appendChild(ligolw.LIGO_LW())
 sim = lsctables.New(lsctables.SimBurstTable)
 lw.appendChild(sim)
+#add_numrel_data(xmldoc)
 procrow = process.register_to_xmldoc(xmldoc, "ligolw_binj", options.__dict__)
 
 # Setup some global parameters
 stop, start = options.gps_end_time, options.gps_start_time
 random.seed(options.seed)
 
-# set up the types of sources
+if options.adhoc_file_location is None and options.burst_family is None:
+    exit("Must specify a burst family or adhoc file locations")
+
 srcs = []
+
+# Record keeping for adhoc file-based injections
+adhoc_families = {}
+
+if options.adhoc_file_location:
+
+    adhoc_families = dict([opt.split("=") for opt in options.adhoc_file_location])
+    for family, path in adhoc_families.iteritems():
+
+        if options.adhoc_min_hrss is not None and options.adhoc_max_hrss is not None:
+            h_values = segment(options.adhoc_min_hrss, options.adhoc_max_hrss)
+        else:
+            if options.adhoc_fix_hrss is not None:
+                h_values = options.adhoc_fix_hrss
+            else:
+                raise ValueError("Current options do not constrain adhoc hrss values.")
+        srcs.append(source(family, options.event_rate, start, stop, hrss=h_values, filepath=path))
+    if options.burst_family is None:
+        options.burst_family = []
+
+
+# set up the types of sources
 for srcname in options.burst_family:
     if srcname == "SineGaussian":
         if options.sg_min_q is not None and options.sg_max_q is not None:
@@ -476,15 +563,22 @@ for srcname in options.burst_family:
             else:
                 raise ValueError("Current options do not constrain WNB frequency values.")
 
+        wnb_use_hrss, h_values, e_values = False, None, None
         if options.wnb_min_egw is not None and options.wnb_max_egw is not None:
             e_values = segment(options.wnb_min_egw, options.wnb_max_egw)
+        elif options.wnb_min_hrss is not None and options.wnb_max_hrss is not None:
+            h_values = segment(options.wnb_min_hrss, options.wnb_max_hrss)
+            wnb_use_hrss = True
         else:
             if options.wnb_fix_egw is not None:
                 e_values = options.wnb_fix_egw
+            elif options.wnb_fix_egw is not None:
+                h_values = options.wnb_fix_hrss
+                wnb_use_hrss = True
             else:
                 raise ValueError("Current options do not constrain WNB E_GW values.")
 
-        srcs.append(source(srcname, options.event_rate, start, stop, distance=options.wnb_max_dist, duration=d_values, bandwidth=b_values, frequency=f_values, egw=e_values))
+        srcs.append(source(srcname, options.event_rate, start, stop, distance=options.wnb_max_dist, duration=d_values, bandwidth=b_values, frequency=f_values, egw=e_values, hrss=h_values, wnb_use_hrss = wnb_use_hrss))
 
 for src in srcs:
 
@@ -504,6 +598,10 @@ for src in srcs:
     elif src.waveform == "BTLWNB":
         band, dur, f, egw = src.draw_wnb_params()
         dist = src.volume_distributed_distances()
+    elif src.waveform in adhoc_families:
+        hrss = src.draw_imp_params()
+    else:
+        raise ValueError("Invalid waveform family indicator, and no file has been supplied to numrel_data.")
 
     ra, dec, pol = src.uniform_sky()
 
@@ -517,6 +615,7 @@ for src in srcs:
 
         # string paramters
         row.waveform = src.waveform
+        row.numrel_data = src.numrel_data
 
         # time parameters
         row.set_time_geocent(GPS(float(t)))
@@ -569,8 +668,17 @@ for src in srcs:
             row.pol_ellipse_angle = 0.0
             # dist in Mpc
             # expected units are M_solar / pc^2
-            row.egw_over_rsquared = egw[i] / dist[i]**2 * 1e-12
-            row.hrss = measure_hrss(row)[0]
+            if options.wnb_fix_hrss or options.wnb_min_hrss or options.wmb_max_hrss:
+                row.hrss = egw[i]
+                # Maggiore (2008), eqn 7.111, adjusted for M_solar / c^2
+                row.egw_over_rsquared = row.hrss**2 * numpy.pi**2 * row.frequency**2 * lal.C_SI / lal.G_SI / lal.MSUN_SI * lal.PC_SI**2
+                # Not strictly necessary, but the hrss we measure from the
+                # generated waveform usually ends up being a bit different than
+                # the input
+                row.hrss = measure_hrss(row)[0]
+            else:
+                row.egw_over_rsquared = egw[i] / dist[i]**2 * 1e-12
+                row.hrss = measure_hrss(row)[0]
 
         sim.append(row)
 
