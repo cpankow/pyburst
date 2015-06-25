@@ -17,7 +17,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 """
-setup.py file for PyCBC package
+setup.py file for PyBurst package
 """
 import os
 import fnmatch
@@ -266,6 +266,8 @@ setup (
     requires = requires,
     scripts  = [
                'bin/pyburst_excesspower',
+               'bin/pyburst_binj',
+               'bin/pyburst_inj_snr',
                ],
     packages = [
                'pyburst',
