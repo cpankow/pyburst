@@ -158,16 +158,9 @@ class TestBase(Command):
             print test
 
 class test(Command):
-    def has_cuda(self):
-        import pyburst
-        return pyburst.HAVE_CUDA
-    def has_opencl(self):
-        import pyburst
-        return pyburst.HAVE_OPENCL
 
-    sub_commands = [('test_cpu',None),('test_cuda',has_cuda),('test_opencl',has_opencl)]
     user_options = []
-    description = "run the available tests for all compute schemes (cpu,cuda,opencl)"
+    description = "run the available tests"
     def initialize_options(self):
         pass
     def finalize_options(self):
@@ -175,24 +168,6 @@ class test(Command):
     def run(self):
         for cmd_name in self.get_sub_commands():
             self.run_command(cmd_name)
-
-class test_cpu(TestBase):
-    description = "run all CPU tests"
-    def initialize_options(self):
-        TestBase.initialize_options(self)
-        self.scheme = 'cpu'
-
-class test_cuda(TestBase):
-    description = "run CUDA tests"
-    def initialize_options(self):
-        TestBase.initialize_options(self)
-        self.scheme = 'cuda'
-
-class test_opencl(TestBase):
-    description = "run OpenCL tests"
-    def initialize_options(self):
-        TestBase.initialize_options(self)
-        self.scheme = 'opencl'
 
 # write versioning info
 def generate_version_info():
@@ -243,8 +218,8 @@ class build_docs_test(Command):
         pass
     def run(self):
         subprocess.check_call("cd docs; cp conf_test.py conf.py; sphinx-apidoc -o ./ -f -A 'PyBurst dev team' -V '0.1' ../pyburst && make html",
-                            stderr=subprocess.STDOUT, shell=True)                            
-                           
+                            stderr=subprocess.STDOUT, shell=True)
+
 # do the actual work of building the package
 VERSION = generate_version_info()
 
@@ -252,15 +227,12 @@ setup (
     name = 'PyBurst',
     version = VERSION,
     description = 'Gravitational wave transient analysis toolkit',
-    author = 'Ligo Virgo Collaboration - PyBurst team',
-    #url = 'https://sugwg-git.phy.syr.edu/dokuwiki/doku.php?id=pycbc:home',
+    author = 'LIGO-Virgo Collaboration - PyBurst team',
+    url = 'https://github.com/cpankow/pyburst/',
     cmdclass = { 'test'  : test,
                  'build_docs' : build_docs,
                  'build_docs_test' : build_docs_test,
                  'install' : install,
-                 'test_cpu':test_cpu,
-                 'test_cuda':test_cuda,
-                 'test_opencl':test_opencl,
                  'clean' : clean,
                  'build' : build},
     requires = requires,
@@ -272,5 +244,4 @@ setup (
     packages = [
                'pyburst',
                ],
-     #package_data = {'pycbc.workflow': find_package_data('pycbc/workflow')},
 )
