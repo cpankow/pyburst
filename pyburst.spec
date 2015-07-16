@@ -1,6 +1,6 @@
 Name:           python-pyburst
 Summary:        Python tools for Burst gravitational-wave data analysis
-Version:        0.1
+Version:        0.0.1
 Release:        1
 License:        GPL
 Group:          Development/Libraries
