@@ -221,13 +221,15 @@ class build_docs_test(Command):
                             stderr=subprocess.STDOUT, shell=True)
 
 # do the actual work of building the package
-VERSION = generate_version_info()
+#VERSION = generate_version_info()
+VERSION = "0.0.1"
 
 setup (
     name = 'PyBurst',
     version = VERSION,
     description = 'Gravitational wave transient analysis toolkit',
     author = 'LIGO-Virgo Collaboration - PyBurst team',
+    author_email = 'chris.pankow@ligo.org',
     url = 'https://github.com/cpankow/pyburst/',
     cmdclass = { 'test'  : test,
                  'build_docs' : build_docs,
