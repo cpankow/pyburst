@@ -149,27 +149,6 @@ def uniform_interval(interval, num):
     """
     return (interval[1] - interval[0]) * random.random_sample(num) + interval[0]
 
-# FIXME: Just use the SimBurstUtils version when it becomes mainline
-def add_numrel_data(xmldoc):
-    # add columns if required
-    add_numrel_data_to_table(lsctables.SimBurstTable.get_table(xmldoc))
-
-def add_numrel_data_to_table(sim_burst_table):
-    added = False
-    try:
-        sim_burst_table.getColumnByName("numrel_data")
-    except KeyError:
-        sim_burst_table.appendColumn("numrel_data")
-        added = True
-
-    if not added:
-        # didn't add any columns, so don't muck their contents
-        return
-
-    # column was added, initialize
-    for row in sim_burst_table:
-        row.numrel_data = ""
-
 # FIXME: Make different injection sources subclass this
 class source(object):
     """
@@ -187,7 +166,6 @@ class source(object):
         """
         self.waveform = waveform
         self.wnb_use_hrss = kwargs["wnb_use_hrss"] if kwargs.has_key("wnb_use_hrss") else False
-        self.numrel_data = ""
         if waveform == "SineGaussian":
             if not kwargs.has_key("q") or not kwargs.has_key("frequency") or not kwargs.has_key("hrss"):
                 raise ValueError("SineGaussian distribution requires a range of q and f.")
@@ -217,7 +195,6 @@ class source(object):
             if not kwargs.has_key("hrss"):
                 raise ValueError("Ad-hoc distribution requires a range of amplitude.")
             self.h_range = kwargs["hrss"]
-            self.numrel_data = kwargs["filepath"]
         else:
             raise ValueError("Unknown waveform family %s." % waveform)
 
@@ -447,7 +424,6 @@ xmldoc = ligolw.Document()
 lw = xmldoc.appendChild(ligolw.LIGO_LW())
 sim = lsctables.New(lsctables.SimBurstTable)
 lw.appendChild(sim)
-#add_numrel_data(xmldoc)
 procrow = process.register_to_xmldoc(xmldoc, "ligolw_binj", options.__dict__)
 
 # Setup some global parameters
@@ -601,7 +577,7 @@ for src in srcs:
     elif src.waveform in adhoc_families:
         hrss = src.draw_imp_params()
     else:
-        raise ValueError("Invalid waveform family indicator, and no file has been supplied to numrel_data.")
+        raise ValueError("Invalid waveform family indicator.")
 
     ra, dec, pol = src.uniform_sky()
 
@@ -615,7 +591,6 @@ for src in srcs:
 
         # string paramters
         row.waveform = src.waveform
-        row.numrel_data = src.numrel_data
 
         # time parameters
         row.set_time_geocent(GPS(float(t)))
