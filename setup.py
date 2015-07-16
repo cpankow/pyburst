@@ -237,7 +237,7 @@ setup (
                  'build' : build},
     requires = requires,
     scripts  = [
-               'bin/pyburst_excesspower',
+               #'bin/pyburst_excesspower',
                'bin/pyburst_binj',
                'bin/pyburst_inj_snr',
                ],
