@@ -6,9 +6,6 @@ pyburst is based on pycbc, more information can be found at the website:
 When installing pyburst:
    python setup.py install --prefix=/path/to/install/directory
 
-To run the unittests pyburst:
-   python setup.py test
-
 The most current development version is always available from our
 git repository:
 
