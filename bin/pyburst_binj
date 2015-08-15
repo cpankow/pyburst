@@ -172,6 +172,11 @@ class source(object):
             self.q_range = kwargs["q"]
             self.f_range = kwargs["frequency"]
             self.h_range = kwargs["hrss"]
+        if waveform == "Gaussian":
+            if not kwargs.has_key("duration") or not kwargs.has_key("hrss"):
+                raise ValueError("Gaussian distribution requires a range of duration.")
+            self.d_range = kwargs["duration"]
+            self.h_range = kwargs["hrss"]
         elif waveform == "StringCusp":
             if not kwargs.has_key("frequency") or not kwargs.has_key("amplitude"):
                 raise ValueError("StringCusp distribution requires a range of amplitude and f.")
@@ -241,17 +246,22 @@ class source(object):
         else:
             q = map(lambda i: self.q_range[i], random.randint(0, len(self.q_range), self.expnum) )
 
+    def draw_gauss_params(self):
+        """
+        Draw a set of parameters (hrss, duration) appropriate for a set of gaussian type injections.
+        """
+        h, d = [], []
+        if type(self.d_range) == segment:
+            q = uniform_interval(self.d_range, self.expnum)
+        else:
+            q = map(lambda i: self.d_range[i], random.randint(0, len(self.d_range), self.expnum) )
+
         if type(self.h_range) == segment:
             h = self.log_hrss()
         else:
             h = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum) )
 
-        if type(self.f_range) == segment:
-            f = uniform_interval(self.f_range, self.expnum)
-        else:
-            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
-
-        return q, f, h
+        return d, h
 
     def draw_cusp_params(self):
         """
@@ -344,7 +354,7 @@ parser = OptionParser(description = __doc__)
 general_section = OptionGroup(parser, "General", "This group controls the general behavior of injections, such as their GPS timing and other common variables.")
 general_section.add_option("--gps-start-time", metavar = "seconds", type = "int", help = "Set the start time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
 general_section.add_option("--gps-end-time", metavar = "seconds", type = "int", help = "Set the end time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
-general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, StringCusp, BTLWNB, and Impulse.")
+general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, Gaussian, StringCusp, BTLWNB, and Impulse.")
 general_section.add_option("--output", metavar = "filename", default="binj.xml.gz", help = "Set the name of the LIGO light-weight XML file to output")
 general_section.add_option("--seed", metavar = "int", type = "int", default = 1, help = "set the random seed default = 1")
 general_section.add_option("--time-slide-id", metavar= "int", type = "int", default = 0, help = "Use the time slide id, default is 0.")
@@ -375,6 +385,15 @@ sg_section.add_option("--sg-min-f", metavar = "Hz", type = "float", help = "Fix 
 sg_section.add_option("--sg-max-f", metavar = "Hz", type = "float", help = "Fix the max frequency value of the SineGaussian injections.")
 sg_section.add_option("--sg-polarization-type", metavar = "type", default='elliptical', help = "Fix the polarization type of the SineGaussian injections. Valid types are linear, circular, elliptical, and inclination (uniform in cos(i)). Default is elliptical.")
 parser.add_option_group(sg_section)
+
+gauss_section = OptionGroup(parser, "Gaussian options", "This group controls the distribution of Gaussian injections.")
+gauss_section.add_option("--gauss-fix-hrss", metavar = "strain", type = "float", action="append", help = "Fix the hrss value of the Gaussian injections. Give several times with different values to build up an array of hrss to choose from. Overrides min and max options.")
+gauss_section.add_option("--gauss-min-hrss", metavar = "strain", type = "float", help = "Fix the min hrss value of the Gaussian injections.")
+gauss_section.add_option("--gauss-max-hrss", metavar = "strain", type = "float", help = "Fix the max hrss value of the Gaussian injections.")
+gauss_section.add_option("--gauss-fix-dur", metavar = "duration", type = "float", action="append", help = "Fix the duration of the Gaussian injections. Give several times with different values to build up an array of durations to choose from. Overrides min and max options.")
+gauss_section.add_option("--gauss-min-dur", metavar = "duration", type = "float", help = "Fix the min Q value of the Gaussian injections.")
+gauss_section.add_option("--gauss-max-dur", metavar = "duration", type = "float", help = "Fix the max Q value of the Gaussian injections.")
+parser.add_option_group(gauss_section)
 
 wnb_section = OptionGroup(parser, "Band and time limited white noise burst (BTLWNB) options", "This group controls the distribution of BTLWNB injections.")
 wnb_section.add_option("--wnb-max-dist", metavar = "Mpc", default = 1.0, type = "float", help = "Maximum distance for which to produce WNB in Mpc, default is 1.")
@@ -567,6 +586,8 @@ for src in srcs:
 
     if src.waveform == "SineGaussian":
         q, f, hrss = src.draw_sg_params()
+    elif src.waveform == "Gaussian":
+        d, hrss = src.draw_sg_params()
     elif src.waveform == "StringCusp":
         amp, f = src.draw_cusp_params()
     elif src.waveform == "Impulse":
@@ -624,6 +645,12 @@ for src in srcs:
                 row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
             row.hrss = hrss[i]
 
+        elif row.waveform == "Gaussian":
+            # Gaussian injections are linearly polarized
+            # See: http://software.ligo.org/docs/lalsuite/lalsimulation/group___l_a_l_sim_burst__h.html#
+            row.pol_ellipse_e = 1.0
+            row.pol_ellipse_angle = 0.0
+            row.hrss = hrss[i]
         elif row.waveform == "StringCusp":
             row.frequency = f[i]
             row.amplitude = amp[i]
