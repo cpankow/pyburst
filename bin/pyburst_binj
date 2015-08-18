@@ -646,13 +646,13 @@ for src in srcs:
     else:
         raise ValueError("Invalid waveform family indicator.")
 
-    if opts.skyloc_distr == "isotropic":
+    if options.skyloc_distr == "isotropic":
         ra, dec, pol = src.uniform_sky()
-    elif opts.skyloc_distr == "antenna":
+    elif options.skyloc_distr == "antenna":
         # FIXME: Hardcoding
         ra, dec, pol = src.draw_favorable_sky(("H1", "L1"), t)
     else:
-        raise ValueError("Invalid specification for --skyloc-distr option: %s, must be 'isotropic' or 'antenna'" % opts.skyloc_distr)
+        raise ValueError("Invalid specification for --skyloc-distr option: %s, must be 'isotropic' or 'antenna'" % options.skyloc_distr)
 
     for i, t in enumerate(time):
         row = sim.RowType()
