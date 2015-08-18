@@ -626,7 +626,8 @@ for src in srcs:
     if options.event_time_type == "random":
         time = src.uniform_time()
     elif options.event_time_type == "fixed":
-        interval = (stop - start) / src.expnum
+        expnum_exact = (src.tstop-src.tstart) * options.event_rate / 365.0 / 24 / 3600
+        interval = (stop - start) / expnum_exact
         time = numpy.array(map(lambda i: start + i*interval + options.jitter *(random.rand()-0.5), range(1,src.expnum+1)))
 
     if src.waveform == "SineGaussian":
