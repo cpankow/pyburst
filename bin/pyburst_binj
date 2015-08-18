@@ -42,7 +42,7 @@ header = "#\tGravEn_SimID\tSimHrss\tSimEgwR2\tGravEn_Ampl\tInternal_x\tInternal_
 def write_burst_mdc_row( row, start=0 ):
     """
     Fill in a template row of a BurstMDC style (GravEn) log.
-    
+
     Template:
     template = simulation_id, hrss, egw, graven_amp, internal_x, internal_phi, external_x, external_phi, external_psi, frame_gps, earth_center_gps, waveform, simhphp, simhxhx, simhphx, g1fp, g1fx, 0, 0, 0, h1fp, h1fx, 0, 0, 0, h2fp, h2fx, 0, 0, 0, l1fp, l1fx, 0, 0, 0, v1fp, v1fx, 0, 0, 0
     """
@@ -122,6 +122,18 @@ def measure_hrss(row, rate=16384.0):
     # |H+Hx|
     hphx = (lalsimulation.MeasureHrss(hp, hx0)**2 - hrss**2)/2
     return hrss, hphp, hxhx, hphx
+
+def sky_params(net, time, ra, dec, psi, incl=numpy.pi):
+    if not (0 < ra < 2 * numpy.pi) or not (0 < psi < 2 * numpy.pi) or not(-numpy.pi/2 < dec < numpy.pi/2):
+        return 0.0
+
+    fp, fx = 0, 0
+    for ifo in net:
+        tp, tx, _, _ = response(time, ra, dec, incl, psi, 'radians', ifo)
+        fp += tp**2
+        fx += fx**2
+    fp, fx = math.sqrt(fp), math.sqrt(fx)
+    return (fp + fx) / len(net)
 
 def uniform_dec(num):
     """
@@ -349,6 +361,26 @@ class source(object):
         pol = uniform_phi(expnum)
         return ra, dec, pol
 
+    def favorable_sky(net, time):
+        """
+        Wander through the skies, searching for a most favorable location --- draw extrinsic parameters as if the network antenna pattern magnitude were the PDF.
+        """
+        ndraws = len(time)
+        ra_out, dec_out, psi_out = numpy.empty((3, len(time)))
+        while ndraws > 0:
+            ra = numpy.random.uniform(0, 2 * numpy.pi, 1000)
+            dec = numpy.random.uniform(-numpy.pi / 2, numpy.pi / 2, 1000)
+            psi = numpy.random.uniform(0, 2 * numpy.pi, 1000)
+            rnd = numpy.random.uniform(0, 1, 1000)
+            for r, d, p, n in zip(ra, dec, psi, rnd):
+                if n < sky_params(net, time, r, d, p):
+                    ndraws -= 1
+                    ra_out[ndraws] = r
+                    dec_out[ndraws] = d
+                    psi_out[ndraws] = p
+                    break
+        return ra_out, dec_out, psi_out
+
     def uniform_time(self):
         """
         Get a set of randomized (integer) event times.
@@ -366,7 +398,8 @@ parser = OptionParser(description = __doc__)
 general_section = OptionGroup(parser, "General", "This group controls the general behavior of injections, such as their GPS timing and other common variables.")
 general_section.add_option("--gps-start-time", metavar = "seconds", type = "int", help = "Set the start time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
 general_section.add_option("--gps-end-time", metavar = "seconds", type = "int", help = "Set the end time of the segment to analyze in GPS seconds (required).  Can be specified to nanosecond precision.")
-general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, Gaussian, StringCusp, BTLWNB, and Impulse.")
+general_section.add_option("--skyloc-distr", default="isotropic", help = "Set the distribution of extrinsic parameters, specifically: right ascension, declination, and polarization angle. Valid choices are 'isotropic' and 'antenna'. Isotropic is uniform in the sky with a uniform polarization angle, and antenna refers to a distribution which prefers favorable values of those parameters over others.")
+general_section.add_option("--burst-family", metavar="str", action="append", help = "Set the name of the burst waveform family, required, valid choices are SineGaussian, StringCusp, BTLWNB, and Impulse.")
 general_section.add_option("--output", metavar = "filename", default="binj.xml.gz", help = "Set the name of the LIGO light-weight XML file to output")
 general_section.add_option("--seed", metavar = "int", type = "int", default = 1, help = "set the random seed default = 1")
 general_section.add_option("--time-slide-id", metavar= "int", type = "int", default = 0, help = "Use the time slide id, default is 0.")
@@ -612,9 +645,15 @@ for src in srcs:
     else:
         raise ValueError("Invalid waveform family indicator.")
 
-    ra, dec, pol = src.uniform_sky()
+    if opts.skyloc_distr == "isotropic":
+        ra, dec, pol = src.uniform_sky()
+    elif opts.skyloc_distr == "antenna":
+        # FIXME: Hardcoding
+        ra, dec, pol = src.draw_favorable_sky(("H1", "L1"), t)
+    else:
+        raise ValueError("Invalid specification for --skyloc-distr option: %s, must be 'isotropic' or 'antenna'" % opts.skyloc_distr)
 
-    for i,t in enumerate(time):
+    for i, t in enumerate(time):
         row = sim.RowType()
         print "Generating %s at %f" % (src.waveform, t)
 
@@ -686,7 +725,7 @@ for src in srcs:
             row.pol_ellipse_angle = 0.0
             # dist in Mpc
             # expected units are M_solar / pc^2
-            if options.wnb_fix_hrss or options.wnb_min_hrss or options.wmb_max_hrss:
+            if options.wnb_fix_hrss or options.wnb_min_hrss or options.wnb_max_hrss:
                 row.hrss = egw[i]
                 # Maggiore (2008), eqn 7.111, adjusted for M_solar / c^2
                 row.egw_over_rsquared = row.hrss**2 * numpy.pi**2 * row.frequency**2 * lal.C_SI / lal.G_SI / lal.MSUN_SI * lal.PC_SI**2
