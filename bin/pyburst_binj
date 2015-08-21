@@ -246,6 +246,18 @@ class source(object):
         else:
             q = map(lambda i: self.q_range[i], random.randint(0, len(self.q_range), self.expnum) )
 
+        if type(self.h_range) == segment:
+            h = self.log_hrss()
+        else:
+            h = map(lambda i: self.h_range[i], random.randint(0, len(self.h_range), self.expnum) )
+
+        if type(self.f_range) == segment:
+            f = uniform_interval(self.f_range, self.expnum)
+        else:
+            f = map(lambda i: self.f_range[i], random.randint(0, len(self.f_range), self.expnum))
+
+        return q, f, h
+
     def draw_gauss_params(self):
         """
         Draw a set of parameters (hrss, duration) appropriate for a set of gaussian type injections.
