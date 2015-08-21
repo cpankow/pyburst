@@ -172,7 +172,7 @@ class source(object):
             self.q_range = kwargs["q"]
             self.f_range = kwargs["frequency"]
             self.h_range = kwargs["hrss"]
-        if waveform == "Gaussian":
+        elif waveform == "Gaussian":
             if not kwargs.has_key("duration") or not kwargs.has_key("hrss"):
                 raise ValueError("Gaussian distribution requires a range of duration.")
             self.d_range = kwargs["duration"]
