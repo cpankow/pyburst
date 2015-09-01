@@ -222,7 +222,7 @@ class build_docs_test(Command):
 
 # do the actual work of building the package
 #VERSION = generate_version_info()
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 
 setup (
     name = 'PyBurst',
