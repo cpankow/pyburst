@@ -692,9 +692,10 @@ for src in srcs:
                 row.pol_ellipse_e = uniform_interval((0,1),1)[0]
                 row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
             elif options.sg_polarization_type == "inclination":
-                cosincl = uniform_interval((-1,1),1)[0]
-                row.pol_ellipse_e = math.sqrt(1 - 2 * cosincl / (1 + cosincl**2))
-                row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
+                cosincl = uniform_interval((-1, 1), 1)[0]**2
+                row.pol_ellipse_e = math.sqrt(1 - 4 * cosincl / (1 + cosincl)**2)
+                #row.pol_ellipse_angle = uniform_interval((0,2*numpy.pi),1)[0]
+                row.pol_ellipse_angle = -numpy.pi/2 if uniform_interval((0, 1), 1)[0] < 0.5 else numpy.pi/2
             row.hrss = hrss[i]
 
         elif row.waveform == "Gaussian":
