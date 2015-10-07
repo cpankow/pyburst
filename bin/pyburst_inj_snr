@@ -321,6 +321,7 @@ optp.add_option("--eff-attribute", default="hrss", help="SimBurst attribute agai
 optp.add_option("--eff-bins", default=20, type=int, help="Number of bins over which to measure efficiency. Default is 20.")
 optp.add_option("--eff-rank", default="netSNR", help="How to rank injections for efficiency purposes. Valid choices are ``netSNR'' (network SNR), ``cohSNR'' (coherent SNR), and ``eta'' (cWB network amplitude). Default is netSNR.")
 
+optp.add_option("--horizon", action="store_true", help="Ignore geometric orientations, and produce the maximal SNR per detector and horizon distance.")
 optp.add_option("--calculate-only", action="store_true", help="Do not perform any injection cutting or squeezing, calculate values only.")
 optp.add_option("--machine-parse", action="store_true", help="Print in a machine parseable way.")
 optp.add_option("--no-print-single-ifo", action="store_true", default=False, help="Don't print individual IFO SNRs.")
@@ -481,8 +482,12 @@ for row in sims:
             hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
             hp.epoch += time
             hx.epoch += time
-            h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
+            if not opts.horizon:
+                h = lalsimulation.SimDetectorStrainREAL8TimeSeries( hp, hx,
                     row.longitude, row.latitude, row.polarization, det )
+            else:
+                hp.data.data += hx.data.data
+                h = hp
             ra, dec, psi = row.longitude, row.latitude, row.polarization
             f_low_wave = max(opts.low_frequency_cutoff, row.f_lower)
         # burst case
@@ -523,6 +528,11 @@ for row in sims:
 
         snr[d] = hoff_single_ifo_snr(hf, psd, f_low_wave, min(opts.high_frequency_cutoff or float("inf"), opts.nyquist_frequency))
 
+        if opts.horizon:
+            horizon_dist = snr[d] / 8 * row.distance
+            print "Maximal SNR for signal %f. Horizon distance is %f Mpc" % (snr[d], horizon_dist)
+            break # Don't care about the rest
+
         #
         # Reassign SNRs to be within a certain range
         #
@@ -552,6 +562,9 @@ for row in sims:
             sngl_row = sim_to_sngl_burst(row, det.frDetector.prefix, sngl_table)
             sngl_row.snr = snr[d]**2 # SNR column is energy, really
             sngl_row.event_id = sngl_table.get_next_id()
+
+    if opts.horizon:
+        continue
 
     #
     # Network SNR
