@@ -692,20 +692,25 @@ try:
     print "%d burst injections would be cut from SNR thresholds." % len(sb_ids)
     n = len(sim_burst)-1
     for i, sb in enumerate(sim_burst[::-1]):
-        if int(sb.simulation_id) in sb_ids:
+        if sb.simulation_id in sb_ids:
             del sim_burst[n-i]
 except ValueError:
     pass
+
 try:
     sim_insp = table.get_table(xmldoc, lsctables.SimInspiralTable.tableName)
     si_ids = map(lambda sb: sb[1], filter(lambda cut: cut[0] == lalmetaio.SimInspiralTable, cut_sims))
     print "%d inspiral injections would be cut from SNR thresholds." % len(si_ids)
     n = len(sim_insp)-1
     for i, si in enumerate(sim_insp[::-1]):
-        if int(si.simulation_id) in si_ids:
+        if si.simulation_id in si_ids:
             del sim_insp[n-i]
 except ValueError:
     pass
+
+if len(cut_sims) > 0:
+    print "Writing cut XML file."
+    utils.write_filename(xmldoc, "cut_tmp.xml")
 
 #
 # Record "triggers" with optimal information
@@ -729,12 +734,8 @@ if opts.store_sngl is not None or opts.store_sim:
 if opts.calculate_only:
     exit(0)
 
-if len(cut_sims) > 0:
-    print "Writing cut XML file."
-    utils.write_filename( xmldoc, "cut_tmp.xml" )
-
 if opts.sim_id is not None:
-    exit()
+    exit(0)
 
 from pylal import imr_utils
 from pylal import rate
