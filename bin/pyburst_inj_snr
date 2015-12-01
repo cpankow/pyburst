@@ -463,7 +463,10 @@ if opts.store_sngl == "sngl_inspiral":
 elif opts.store_sngl == "sngl_burst":
     sngl_table = sim_to_sngl_table(lsctables.SimBurstTable, lsctables.SnglBurstTable)
 
-sim_snr_table = lsctables.New(lsctables.SimBurstTable)
+if "SimInspiral" in str(type(sims[0])):
+    sim_snr_table = lsctables.New(lsctables.SimInspiralTable)
+elif "SimBurst" in str(type(sims[0])):
+    sim_snr_table = lsctables.New(lsctables.SimBurstTable)
 
 i = 0
 for row in sims:
@@ -571,7 +574,10 @@ for row in sims:
     #
     net_snr = numpy.sqrt(sum([ s**2 for s in snr.values()]))
     if opts.store_sim:
-        row.amplitude = net_snr
+        if "SimInspiral" in str(type(row)):
+            row.alpha1 = net_snr
+        elif "SimBurst" in str(type(row)):
+            row.amplitude = net_snr
         sim_snr_table.append(row)
 
     if opts.machine_parse and not opts.no_print_network:
@@ -724,7 +730,10 @@ if opts.store_sngl is not None or opts.store_sim:
 
     if opts.store_sim:
         for i, row in enumerate(sim_snr_table):
-            sim_snr_table[i] = copy_sim_burst_swig(row, sim_snr_table)
+            if "SimBurst" in str(type(row)):
+                sim_snr_table[i] = copy_sim_burst_swig(row, sim_snr_table)
+            elif "SimInspiral" in str(type(row)):
+                sim_snr_table[i] = copy_sim_inspiral_swig(row, sim_snr_table)
         xmldoc.childNodes[0].appendChild(sim_snr_table)
         ifos = reduce(str.__add__, [ifo[0] for ifo in detector_psds.keys()])
 
