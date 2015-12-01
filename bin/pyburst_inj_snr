@@ -205,6 +205,21 @@ def sim_to_sngl_burst(sim, ifo, sngl_table):
     sngl_table.append(sngl_row)
     return sngl_row
 
+def get_waveform_from_row(row, dt, fref=None, z=0.0, lambda1=0.0, lambda2=0.0, amporder=0):
+    # FIXME:
+    waveflags = lalsimulation.SimInspiralCreateWaveformFlags()
+    approximant = lalsimulation.GetApproximantFromString(row.waveform)
+    phorder = lalsimulation.GetOrderFromString(row.waveform)
+    fref = row.f_lower if fref is None else fref
+    return lalsimulation.SimInspiralTD(
+        row.coa_phase, dt,
+        row.mass1 * lal.MSUN_SI, row.mass2 * lal.MSUN_SI,
+        row.spin1x, row.spin1y, row.spin1z,
+        row.spin2x, row.spin2y, row.spin2z,
+        row.f_lower, fref, row.distance * lal.PC_SI * 1e6, z,
+        row.inclination, lambda1, lambda2,
+        waveflags, None, amporder, phorder, approximant)
+
 def hoff_single_ifo_snr(hf, psd=None, f_low=0, f_high=None):
     """
     Determine the single IFO SNR of a frequency domain waveform hf, with a given psd. If no psd is supplied (None), then return the hrss. Integration will take place over f_low (0 by default) to f_high (likely nyquist).
@@ -482,7 +497,7 @@ for row in sims:
         # inspiral case
         if type(row) == lalmetaio.SimInspiralTable:
             time = row.geocent_end_time
-            hp, hx = lalinspiral.SimInspiralChooseWaveformFromSimInspiral( row, 0.5/fnyq )
+            hp, hx = get_waveform_from_row(row, 0.5/fnyq)
             hp.epoch += time
             hx.epoch += time
             if not opts.horizon:
