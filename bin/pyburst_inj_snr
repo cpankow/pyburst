@@ -335,6 +335,7 @@ optp.add_option("--snr-thresh", type=float, default=8.0, help="SNR threshold (ne
 optp.add_option("--eff-attribute", default="hrss", help="SimBurst attribute against which to measure efficiency. Default is 'hrss', valid choices are any SimBurst attribute.")
 optp.add_option("--eff-bins", default=20, type=int, help="Number of bins over which to measure efficiency. Default is 20.")
 optp.add_option("--eff-rank", default="netSNR", help="How to rank injections for efficiency purposes. Valid choices are ``netSNR'' (network SNR), ``cohSNR'' (coherent SNR), and ``eta'' (cWB network amplitude). Default is netSNR.")
+optp.add_option("--skip-coherent-snr", action="store_true", default=False, help="Don't calculate coherent SNRs.")
 
 optp.add_option("--horizon", action="store_true", help="Ignore geometric orientations, and produce the maximal SNR per detector and horizon distance.")
 optp.add_option("--calculate-only", action="store_true", help="Do not perform any injection cutting or squeezing, calculate values only.")
@@ -598,57 +599,59 @@ for row in sims:
     elif not opts.no_print_network:
         print "Network SNR for %s at %10.3f is %f" % (row.waveform, time, net_snr)
 
-    #
-    # Coherent SNR
-    #
-    time_delays = {}
-    responses = {}
-    d0 = "H1"
-    for d in detectors.keys():
-        time_delays[(d0,d)] = antenna.timeDelay( float(time), ra, dec, 'radians', d0, d )
-    responses = {}
-    # TODO: move this up to the PSD section, since it's only a function of frequency
-    S_f_coh = numpy.zeros( (2, len(f)) )
-    hp_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
-    hx_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
-    hp_coh_det = {}
-    hx_coh_det = {}
-    for d in detectors.keys():
-        responses[d] = antenna.response( float(time), ra, dec, 0, psi, 'radians', d )[:2]
-        # Creighton and Anderson eq. 7.137
-        S_f_coh += numpy.array([ numpy.conj(r)*r/detector_psds[d] for r in responses[d] ])
+    if not opts.skip_coherent_snr:
 
-        # Creighton and Anderson eq. 7.136a (numerator)
-        hp_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][0] / detector_psds[d]
-        hp_coh += hp_coh_det[d]
-        # Creighton and Anderson eq. 7.136b (numerator)
-        hx_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][1] / detector_psds[d]
-        hx_coh += hx_coh_det[d]
-        df = injection_waveforms[d].deltaF
+        #
+        # Coherent SNR
+        #
+        time_delays = {}
+        responses = {}
+        d0 = "H1"
+        for d in detectors.keys():
+            time_delays[(d0,d)] = antenna.timeDelay( float(time), ra, dec, 'radians', d0, d )
+        responses = {}
+        # TODO: move this up to the PSD section, since it's only a function of frequency
+        S_f_coh = numpy.zeros( (2, len(f)) )
+        hp_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
+        hx_coh = numpy.zeros( len(f), dtype=numpy.complex128 )
+        hp_coh_det = {}
+        hx_coh_det = {}
+        for d in detectors.keys():
+            responses[d] = antenna.response( float(time), ra, dec, 0, psi, 'radians', d )[:2]
+            # Creighton and Anderson eq. 7.137
+            S_f_coh += numpy.array([ numpy.conj(r)*r/detector_psds[d] for r in responses[d] ])
 
-    # Creighton and Anderson eq. 7.136a,b (full)
-    hp_coh_f = hp_coh / S_f_coh[0]
-    hx_coh_f = hx_coh / S_f_coh[1]
+            # Creighton and Anderson eq. 7.136a (numerator)
+            hp_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][0] / detector_psds[d]
+            hp_coh += hp_coh_det[d]
+            # Creighton and Anderson eq. 7.136b (numerator)
+            hx_coh_det[d] = injection_waveforms[d].data.data * numpy.exp( 2*numpy.pi * 1j * f * time_delays[(d0,d)] ) * responses[d][1] / detector_psds[d]
+            hx_coh += hx_coh_det[d]
+            df = injection_waveforms[d].deltaF
 
-    # Creighton and Anderson eq. 7.138
-    coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
-    coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
-    if opts.machine_parse and not opts.no_print_coherent:
-        print "%g" % numpy.sqrt(coh_snr)
-    elif not opts.no_print_coherent:
-        print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
+        # Creighton and Anderson eq. 7.136a,b (full)
+        hp_coh_f = hp_coh / S_f_coh[0]
+        hx_coh_f = hx_coh / S_f_coh[1]
 
-    coh_energy = 0
-    coh_energy_mat = {}
-    for ((d1, hf_d1), (d2, hf_d2)) in itertools.combinations( tuple(hp_coh_det.iteritems()), 2 ):
-        coh_energy_mat[(d1,d2)] = sum(hf_d1.conj() * hf_d2 / S_f_coh[0])*df
-        coh_energy += coh_energy_mat[(d1,d2)]
+        # Creighton and Anderson eq. 7.138
+        coh_snr = 4 * numpy.real(sum(hp_coh_f.conj() * hp_coh_f * S_f_coh[0])) * df
+        coh_snr += 4 * numpy.real(sum(hx_coh_f.conj() * hx_coh_f * S_f_coh[1])) * df
+        if opts.machine_parse and not opts.no_print_coherent:
+            print "%g" % numpy.sqrt(coh_snr)
+        elif not opts.no_print_coherent:
+            print "Coherent SNR: %g" % numpy.sqrt(coh_snr)
 
-    eta_est = numpy.sqrt(abs(coh_energy)/len(detectors.values()))
-    if opts.machine_parse and not opts.no_print_cwb:
-        print "%g" % eta_est
-    elif not opts.no_print_cwb:
-        print "Estimated cWB ranking statistic (1G) %g" % eta_est
+        coh_energy = 0
+        coh_energy_mat = {}
+        for ((d1, hf_d1), (d2, hf_d2)) in itertools.combinations( tuple(hp_coh_det.iteritems()), 2 ):
+            coh_energy_mat[(d1,d2)] = sum(hf_d1.conj() * hf_d2 / S_f_coh[0])*df
+            coh_energy += coh_energy_mat[(d1,d2)]
+
+        eta_est = numpy.sqrt(abs(coh_energy)/len(detectors.values()))
+        if opts.machine_parse and not opts.no_print_cwb:
+            print "%g" % eta_est
+        elif not opts.no_print_cwb:
+            print "Estimated cWB ranking statistic (1G) %g" % eta_est
 
     #
     # Reassign SNRs to be within a certain range -- network version
