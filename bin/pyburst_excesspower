@@ -23,6 +23,8 @@ from argparse import ArgumentParser
 
 import numpy
 
+import scipy.stats
+
 from glue.ligolw import lsctables, utils, ligolw
 lsctables.use_in(ligolw.LIGOLWContentHandler)
 from glue.lal import LIGOTimeGPS
@@ -123,22 +125,23 @@ def measure_hrss(z_j_b, lal_filters, spec_corr, psd, delta_t, dof):
     uw_ss_ii = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i], spec_corr, psd) for i in range(nb)])
     # eqn. 57 -- unwhitened mean square of filter with adjacent filter
     uw_ss_ij = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i+1], spec_corr, psd) for i in range(nb-1)])
+    s_j_b_avg = uw_ss_ii * lal_filters[0].deltaF / 2
     # unwhitened sum of squares of wide virtual filter
-    s_j_nb_avg = uw_ss_ii + 2 * us_ss_ij.sum()
+    s_j_nb_avg = uw_ss_ii + 2 * uw_ss_ij.sum()
 
     # eqn. 61
-    s_j_nb_denom = s_j_nb_avg.sum() + 2 / len(lal_filters[0]) * \
+    s_j_nb_denom = s_j_nb_avg.sum() + 2 / len(lal_filters[0].data.data) * \
         (uw_ss_ii[:-1] * uw_ss_ii[1:] * uw_ss_ij).sum()
 
     # eqn. 62
     uw_ups_ratio = s_j_nb_avg / s_j_nb_denom
 
     # eqn. 63 -- approximation of unwhitened signal energy time series
-    s_j_nb = z_j_b * numpy.sqrt(uw_ss_ii)
-    s_j_nb *= math.sqrt(uw_ups_ratio / len(lal_filters[0]))
+    s_j_nb = numpy.sum(z_j_b.T * numpy.sqrt(s_j_b_avg), axis=0)
+    s_j_nb *= numpy.sqrt(uw_ups_ratio / len(lal_filters[0].data.data) * 2)
     # eqn. 64 -- approximate unwhitened signal energy minus noise contribution
     # FIXME: correct axis of summation?
-    return math.sqrt((numpy.absolute(s_j_nb.sum(axis=0))**2).sum() * delta_t - s_j_nb_avg * dot * delta_t)
+    return math.sqrt((numpy.absolute(s_j_nb.sum(axis=0))**2).sum() * delta_t - s_j_nb_avg * delta_t)
 
 def measure_hrss_poorly(tile_energy, sub_psd):
     return math.sqrt(tile_energy / numpy.average(1.0 / sub_psd) / 2)
@@ -173,7 +176,7 @@ def trigger_list_from_map(tfmap, event_list, threshold, start_time, start_freq, 
 
         event.snr = math.sqrt(tfmap[i,j] / event.chisq_dof - 1)
         # FIXME: Magic number 0.62 should be determine empircally
-        event.confidence = -lalburst.lnOneMinusChisqCdf(event.snr * 0.62, event.chisq_dof * 0.62)
+        event.confidence = -lal.LogChisqCCDF(event.snr * 0.62, event.chisq_dof * 0.62)
         if psd is not None:
             # NOTE: I think the pycbc PSDs always start at 0 Hz --- check
             psd_idx_min = int((event.central_freq - event.bandwidth / 2) / psd.delta_f)
@@ -500,7 +503,7 @@ while t_idx_max <= t_idx_max_off:
             # Duration is fixed by the NDOF and bandwidth
             duration = j / 2.0 / current_band
 
-            threshold = lalburst.Chi2Threshold(j, args.tile_fap)
+            threshold = scipy.stats.chi2.isf(args.tile_fap, j)
 
             # Since we clip the data, the start time needs to be adjusted
             # accordingly
@@ -519,7 +522,7 @@ while t_idx_max <= t_idx_max_off:
                 flow_idx = int((event.central_freq - event.bandwidth / 2 - (band / 2) - flow) / band)
                 fhigh_idx = int((event.central_freq + event.bandwidth / 2 + (band / 2) - flow) / band)
                 z_j_b = tf_map[flow_idx:fhigh_idx,etime_min_idx:etime_max_idx]
-                measure_hrss(z_j_b, lal_filters, spec_corr, lal_psd, delta_t, event.chisq_dof)
+                #measure_hrss(z_j_b, lal_filters, spec_corr, lal_psd, ts_data.delta_t, event.chisq_dof)
 
             print "Total number of events: %d" % len(event_list)
 
