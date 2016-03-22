@@ -22,7 +22,6 @@ import math
 from argparse import ArgumentParser
 
 import numpy
-
 import scipy.stats
 
 from glue.ligolw import lsctables, utils, ligolw
@@ -56,19 +55,21 @@ def construct_args():
     psd.insert_psd_option_group(argp)
     return argp
 
-def calculate_spectral_correlation(fft_window_len, wtype='hann'):
+def calculate_spectral_correlation(fft_window_len, wtype='hann', window_fraction=None):
+    """
+    Calculate the two point spectral correlation introduced by windowing the data before transforming to the frequency domain -- valid choices are 'hann' and 'tukey'. The window_fraction parameter only has meaning for wtype='tukey'.
+    """
     # FIXME Dict -> window function map
     if wtype == 'hann':
         window = lal.CreateHannREAL8Window(fft_window_len)
     elif wtype == 'tukey':
-        # FIXME: Unhardcode
-        window = lal.CreateTukeyREAL8Window(fft_window_len, 0.0)
+        window = lal.CreateTukeyREAL8Window(fft_window_len, window_fraction)
     else:
         raise ValueError("Can't handle window type %s" % wtype)
 
     fft_plan = lal.CreateForwardREAL8FFTPlan(len(window.data.data), 1)
 
-    return lal.REAL8WindowTwoPointSpectralCorrelation(window, fft_plan)
+    return window, lal.REAL8WindowTwoPointSpectralCorrelation(window, fft_plan)
 
 def create_filter_bank(delta_f, flow, band, nchan, psd, spec_corr):
     filter_length = int(2*band/delta_f)+1
@@ -78,15 +79,24 @@ def create_filter_bank(delta_f, flow, band, nchan, psd, spec_corr):
     for i in range(nchan):
         lal_filter = lalburst.CreateExcessPowerFilter(flow + i*band, band, lal_psd, spec_corr)
         #print lal_filter.name
-
         #print lalburst.ExcessPowerFilterInnerProduct(lal_filter, lal_filter, spec_corr, None)
-        # DEBUG one is 1/sqrt of another
-        #ts = types.FrequencySeries(lal_filter.data.data, delta_f=lal_filter.deltaF, copy=False).to_timeseries(1.0/8192)
-        #print numpy.sqrt(sum(ts**2))/32.0
-
         filter_fseries[i,:] = lal_filter.data.data
         lal_filters.append(lal_filter)
     return filter_fseries, lal_filters
+
+def compute_filter_ips_self(lal_filters, spec_corr, psd=None):
+    """
+    Compute a set of inner products of input filters with themselves. If psd argument is given, the unwhitened filter inner products will be returned.
+    """
+    return numpy.array([lalburst.ExcessPowerFilterInnerProduct(f, f, spec_corr, psd) for f in lal_filters])
+
+def compute_filter_ips_adjacent(lal_filters, spec_corr, psd=None):
+    """
+    Compute a set of filter inner products between input adjacent filters. If psd argument is given, the unwhitened filter inner products will be returned.
+
+    The returned array index is the inner product between the lal_filter of the same index, and its (array) adjacent filter --- assumed to be the frequency adjacent filter.
+    """
+    return numpy.array([lalburst.ExcessPowerFilterInnerProduct(f1, f2, spec_corr, psd) for f1, f2 in zip(lal_filters[:-1], lal_filters[1:])])
 
 def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True):
     """
@@ -102,6 +112,7 @@ def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True)
     #for n in xrange(nc_sum, nchans): # channel position index
     for n in xrange(nc_sum, nchans, nc_sum+1): # channel position index
         for k in xrange(0, nc_sum): # channel sum index
+            # FIXME: We've precomputed this, so use it instead
             mu_sq[n] += 2*lalburst.ExcessPowerFilterInnerProduct(lal_filters[n-k], lal_filters[n-1-k], spec_corr, None)
     #print mu_sq[nc_sum::nc_sum+1]
     if verbose:
@@ -109,39 +120,77 @@ def compute_channel_renomalization(nc_sum, lal_filters, spec_corr, verbose=True)
 
     return mu_sq
 
-# < s^2_j(f_1, b) > = 1 / 2 / N * \delta_t EPIP{\Theta, \Theta; P}
-def uw_sum_sq(filter1, filter2, spec_corr, psd):
-    delta_t, npts = 0, 0
-    return lalburst.ExcessPowerFilterInnerProduct(filter1, filter2, spec_corr, psd) / (2 / filter1.deltaF)
-
-def measure_hrss(z_j_b, lal_filters, spec_corr, psd, delta_t, dof):
+def measure_hrss(z_j_b, uw_ss_ii, uw_ss_ij, w_ss_ij, delta_f, delta_t, filter_len, dof):
     """
     Approximation of unwhitened sum of squares signal energy in a given EP tile. See T1200125 for equation number reference.
+    z_j_b - time frequency map block which the constructed tile covers
+    uw_ss_ii - unwhitened filter inner products
+    uw_ss_ij - unwhitened adjacent filter inner products
+    w_ss_ij - whitened adjacent filter inner products
+    delta_f - frequency binning of EP filters
+    delta_t - native time resolution of the time frequency map
+    filter_len - number of samples in a fitler
+    dof - degrees of freedom in the tile (twice the time-frequency area)
+    """
+
+    s_j_b_avg = uw_ss_ii * delta_f / 2
+    # unwhitened sum of squares of wide virtual filter
+    s_j_nb_avg = uw_ss_ii.sum() / 2 + uw_ss_ij.sum()
+    s_j_nb_avg *= delta_f
+
+    s_j_nb_denom = s_j_b_avg.sum() + 2 * 2 / filter_len * \
+        numpy.sum(numpy.sqrt(s_j_b_avg[:-1] * s_j_b_avg[1:]) * w_ss_ij)
+
+    # eqn. 62
+    uw_ups_ratio = s_j_nb_avg / s_j_nb_denom
+
+    # eqn. 63 -- approximation of unwhitened signal energy time series
+    # FIXME: The sum in this equation is over nothing, but indexed by frequency
+    # I'll make that assumption here too.
+    s_j_nb = numpy.sum(z_j_b.T * numpy.sqrt(s_j_b_avg), axis=0)
+    s_j_nb *= numpy.sqrt(uw_ups_ratio / filter_len * 2)
+    # eqn. 64 -- approximate unwhitened signal energy minus noise contribution
+    # FIXME: correct axis of summation?
+    return math.sqrt(numpy.sum(numpy.absolute(s_j_nb)**2) * delta_t - s_j_nb_avg * dof * delta_t)
+
+# < s^2_j(f_1, b) > = 1 / 2 / N * \delta_t EPIP{\Theta, \Theta; P}
+def uw_sum_sq(filter1, filter2, spec_corr, psd):
+    return lalburst.ExcessPowerFilterInnerProduct(filter1, filter2, spec_corr, psd)
+
+def measure_hrss_slowly(z_j_b, lal_filters, spec_corr, psd, delta_t, dof):
+    """
+    Approximation of unwhitened sum of squares signal energy in a given EP tile. See T1200125 for equation number reference.
+
+    NOTE: This function is deprecated in favor of measure_hrss, since it requires recomputation of many inner products, making it particularly slow.
     """
     # FIXME: Make sure you sum in time correctly
     # Number of finest bands in given tile
     nb = len(z_j_b)
     # eqn. 56 -- unwhitened mean square of filter with itself
     uw_ss_ii = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i], spec_corr, psd) for i in range(nb)])
+    s_j_b_avg = uw_ss_ii * lal_filters[0].deltaF / 2
     # eqn. 57 -- unwhitened mean square of filter with adjacent filter
     uw_ss_ij = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i+1], spec_corr, psd) for i in range(nb-1)])
-    s_j_b_avg = uw_ss_ii * lal_filters[0].deltaF / 2
     # unwhitened sum of squares of wide virtual filter
-    s_j_nb_avg = uw_ss_ii + 2 * uw_ss_ij.sum()
+    s_j_nb_avg = uw_ss_ii.sum() / 2 + uw_ss_ij.sum()
+    s_j_nb_avg *= lal_filters[0].deltaF
 
     # eqn. 61
-    s_j_nb_denom = s_j_nb_avg.sum() + 2 / len(lal_filters[0].data.data) * \
-        (uw_ss_ii[:-1] * uw_ss_ii[1:] * uw_ss_ij).sum()
+    w_ss_ij = numpy.array([uw_sum_sq(lal_filters[i], lal_filters[i+1], spec_corr, None) for i in range(nb-1)])
+    s_j_nb_denom = s_j_b_avg.sum() + 2 * 2 / len(lal_filters[0].data.data) * \
+        (numpy.sqrt(s_j_b_avg[:-1] * s_j_b_avg[1:]) * w_ss_ij).sum()
 
     # eqn. 62
     uw_ups_ratio = s_j_nb_avg / s_j_nb_denom
 
     # eqn. 63 -- approximation of unwhitened signal energy time series
+    # FIXME: The sum in this equation is over nothing, but indexed by frequency
+    # I'll make that assumption here too.
     s_j_nb = numpy.sum(z_j_b.T * numpy.sqrt(s_j_b_avg), axis=0)
     s_j_nb *= numpy.sqrt(uw_ups_ratio / len(lal_filters[0].data.data) * 2)
     # eqn. 64 -- approximate unwhitened signal energy minus noise contribution
     # FIXME: correct axis of summation?
-    return math.sqrt((numpy.absolute(s_j_nb.sum(axis=0))**2).sum() * delta_t - s_j_nb_avg * delta_t)
+    return math.sqrt((numpy.absolute(s_j_nb)**2).sum() * delta_t - s_j_nb_avg * dof * delta_t)
 
 def measure_hrss_poorly(tile_energy, sub_psd):
     return math.sqrt(tile_energy / numpy.average(1.0 / sub_psd) / 2)
@@ -225,11 +274,9 @@ def make_tiles(tf_map, nc_sum, mu_sq):
 #
 # Optimization plan: If we keep the summed complex TF plane in known indices,
 # we can save ourselves individual sums at wider frequency resolutions.
-#
 # Caveats:
 #   1.  We have to keep track of where we're storing things
-#   2.  We have to do it from the finest resolution (for *all* t0s) and work our
-# way up
+#   2.  We have to do it from the finest resolution (for *all* t0s) and work our way up
 #
 # In the end, I think this is a Haar wavelet transform. Look into it
 #
@@ -265,22 +312,15 @@ args = argp.parse_args()
 inseg = segment(LIGOTimeGPS(args.analysis_start_time or args.gps_start_time), LIGOTimeGPS(args.analysis_end_time or args.gps_end_time))
 
 # How long to process in a block of data?
-dt_stride = 8
+dt_stride = args.psd_segment_length
+dt_stride = 32.0
+
 # same, in samples
-ts_stride = dt_stride * args.sample_rate
-
-# How much data on either side of the tukey window to discard
-# NOTE: Nominally, this means that one will lose window_fraction * dt_stride to
-# corruption from the window: this is simply discarded
-# NOTE 2: This is tuned to give an integer offset when used with dt_stride = 8,
-# smaller windows will have fractions of integers, but larger powers of two will
-# still preseve this --- probably not a big deal in the end
-window_fraction = 0.0
-
-outseg = determine_output_segment(inseg, dt_stride, args.sample_rate, window_fraction)
+ts_stride = int(dt_stride * args.sample_rate)
 
 # Bin spacing of the PSD (and filters), lowest frequency of the first filter
-delta_f, flow = 1.0/dt_stride, 0.0
+#delta_f, flow = 1.0/dt_stride, 4.0
+delta_f, flow = 1.0/32.0, 4.0
 
 #if args.min_frequency < args.strain_high_pass:
     #print >>sys.stderr, "Warning: strain high pass frequency %f is greater than the tile minimum frequency %f --- this is likely to cause strange output below the bandpass frequency" % (args.strain_high_pass, args.min_frequency)
@@ -309,8 +349,6 @@ nchans = args.sample_rate / 2 / band - 1
 #nchans = 64
 nchans = 1021
 
-event_list = lsctables.New(lsctables.SnglBurstTable, ['start_time', 'start_time_ns', 'peak_time', 'peak_time_ns', 'duration', 'bandwidth', 'central_freq', 'chisq_dof', 'confidence', 'snr', 'amplitude', 'channel', 'ifo', 'process_id', 'event_id', 'search'])
-
 ts_data = strain.from_cli(args, precision='double', dyn_range_fac=DYN_RANGE_FAC)
 
 #
@@ -320,17 +358,42 @@ ts_data = strain.from_cli(args, precision='double', dyn_range_fac=DYN_RANGE_FAC)
 fd_psd = psd.from_cli(args, int(args.sample_rate/delta_f)/2+1, delta_f, flow, ts_data, dyn_range_factor=DYN_RANGE_FAC)
 # DEBUG for gaussian noise
 #for i in range(len(fd_psd)):
-    #fd_psd[i] = 2.0 / args.sample_rate
+    #fd_psd[i] = 2.0/args.sample_rate
 
-# FIXME: Implicitly assumes Hann window from ts_data creation
-spec_corr = calculate_spectral_correlation(args.sample_rate*8, 'tukey')
-# FIXME: Move to function. Since we don't window the data for whitening purposes
-# this has no meaning beyond a delta function
-#spec_corr.data *= 0.0
-#spec_corr.data[0] = 1.0
+# We need this for the SWIG functions
+lal_psd = fd_psd.lal()
+
+#
+# Whitening window and spectral correlation
+#
+
+# How much data on either side of the tukey window to discard
+# NOTE: Nominally, this means that one will lose window_fraction * dt_stride to
+# corruption from the window: this is simply discarded
+# NOTE 2: This is tuned to give an integer offset when used with dt_stride = 8,
+# smaller windows will have fractions of integers, but larger powers of two will
+# still preseve this --- probably not a big deal in the end
+window_fraction = 0.25
+
+window, spec_corr = calculate_spectral_correlation(ts_stride, 'tukey', window_fraction=window_fraction)
+window = window.data.data
+window_sigma_sq = numpy.mean(window**2)
+# Pre scale the window by its root mean squared -- see eqn 11 of EP document
+#window /= numpy.sqrt(window_sigma_sq)
+
+#
+# Filter generation
+#
 
 # TODO: Match these up
 filter_bank, lal_filters = create_filter_bank(fd_psd.delta_f, flow+band/2, band, nchans, fd_psd, spec_corr)
+
+# This is necessary to compute the mu^2 normalizations
+white_filter_ip = compute_filter_ips_self(lal_filters, spec_corr, None)
+unwhite_filter_ip = compute_filter_ips_self(lal_filters, spec_corr, lal_psd)
+# These two are needed for the unwhitened mean square sum (hrss)
+white_ss_ip = compute_filter_ips_adjacent(lal_filters, spec_corr, None)
+unwhite_ss_ip = compute_filter_ips_adjacent(lal_filters, spec_corr, lal_psd)
 
 #
 # Compute normalization for virtual channel
@@ -345,8 +408,11 @@ for nc_sum in range(0, int(math.log(nchans, 2))): # nc_sum additional channel ad
 # Convert to TF plane
 #
 
+event_list = lsctables.New(lsctables.SnglBurstTable, ['start_time', 'start_time_ns', 'peak_time', 'peak_time_ns', 'duration', 'bandwidth', 'central_freq', 'chisq_dof', 'confidence', 'snr', 'amplitude', 'channel', 'ifo', 'process_id', 'event_id', 'search'])
+
 tf_map = numpy.zeros((nchans, ts_stride), dtype=numpy.complex128)
 
+# Determine boundaries of stride in time domain
 t_idx_min, t_idx_max = 0, ts_stride
 if args.analysis_start_time is not None:
     t_idx_off = args.analysis_start_time - ts_data.start_time
@@ -356,11 +422,14 @@ else:
 t_idx_min += t_idx_off
 t_idx_max += t_idx_off
 
+# Shift to user requested time if necessary
 if args.analysis_start_time is not None:
     t_idx_max_off = args.analysis_end_time - ts_data.start_time
     t_idx_max_off = int(t_idx_max_off * args.sample_rate)
 else:
     t_idx_max_off = len(ts_data)
+
+tmp_filter_bank = numpy.zeros(len(fd_psd), dtype=numpy.complex128)
 
 while t_idx_max <= t_idx_max_off:
 
@@ -370,22 +439,23 @@ while t_idx_max <= t_idx_max_off:
     #print "Generating random time series"
     #for i in range(t_idx_min, t_idx_max):
         #ts_data[i] = numpy.random.normal(0, 1)
+    #for i in range(t_idx_min, t_idx_max):
+        #ts_data[i] = 1. if i == (t_idx_max - t_idx_min)/2 else 0.
     #print "Done"
 
-    tmp_ts_data = types.TimeSeries(ts_data[t_idx_min:t_idx_max]*lal.CreateTukeyREAL8Window(t_idx_max-t_idx_min, window_fraction).data.data, 1.0/args.sample_rate, epoch=ts_data.start_time + float(t_idx_min)/args.sample_rate)
+    tmp_ts_data = types.TimeSeries(ts_data[t_idx_min:t_idx_max]*window, 1.0/args.sample_rate, epoch=ts_data.start_time + float(t_idx_min)/args.sample_rate)
     fs_data = tmp_ts_data.to_frequencyseries()
 
     # Whiten
-    fs_data.data /= numpy.sqrt(fd_psd)
+    # FIXME: Whiten the filters, not the data
+    fs_data.data /= numpy.sqrt(fd_psd) / numpy.sqrt(2 * fd_psd.delta_f)
 
     #
     # Frequency domain filtering
     #
 
     # Force planning to happen
-    # FIXME: Move this out of loop?
-    tmp_filter_bank = numpy.zeros(len(fd_psd), dtype=numpy.complex128)
-    filter.matched_filter_core(types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f), fs_data, h_norm=1, psd=fd_psd, low_frequency_cutoff=lal_filters[0].f0, high_frequency_cutoff=lal_filters[0].f0+2*band)
+    #filter.matched_filter_core(types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f), fs_data, h_norm=1, psd=fd_psd, low_frequency_cutoff=lal_filters[0].f0, high_frequency_cutoff=lal_filters[0].f0+2*band)
 
     import time
     tdiff = time.time()
@@ -401,7 +471,9 @@ while t_idx_max <= t_idx_max_off:
 
         f1 = int(lal_filters[i].f0/fd_psd.delta_f)
         f2 = int((lal_filters[i].f0 + 2*band)/fd_psd.delta_f)+1
-        tmp_filter_bank[f1:f2] = filter_bank[i]
+
+        # FIXME: Why is there a factor of 2 here?
+        tmp_filter_bank[f1:f2] = filter_bank[i] * 2
 
         filtered_series = filter.matched_filter_core(
             types.FrequencySeries(tmp_filter_bank, delta_f=fd_psd.delta_f, copy=False),
@@ -416,7 +488,11 @@ while t_idx_max <= t_idx_max_off:
     tdiff = time.time() - tdiff
     print "Done filtering: %d, total %f" % (int(time.time()), tdiff)
 
-    # FIXME: DEBUG switch
+    #print tf_map.shape
+    #print tf_map.std(axis=1)
+    #print tf_map.std()
+
+    # FIXME: Debug switch
     if True:
         chan_sum_range = [xrange(0, int(math.log(nchans, 2))+1)]
     else:
@@ -455,12 +531,16 @@ while t_idx_max <= t_idx_max_off:
         mu_sq = mu_sq_dict[nc_sum]
 
         sys.stderr.write("\t...calculating tiles...")
-        #tiles = make_indp_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
-        tiles = make_indp_tiles(tf_map[:,::us_rate], nc_sum, mu_sq)
+        if clip_samples > 0: # because [0:-0] does not give the full array
+            tiles = make_indp_tiles(tf_map[:,clip_samples:-clip_samples:us_rate], nc_sum, mu_sq)
+        else:
+            tiles = make_indp_tiles(tf_map[:,::us_rate], nc_sum, mu_sq)
+        #tiles = make_indp_tiles(tf_map[:,::us_rate], nc_sum, mu_sq)
+
         sys.stderr.write(" TF-plane is %dx%s samples... " % tiles.shape)
 
         print >>sys.stderr, " done"
-        #print numpy.mean(tiles), numpy.var(tiles)
+        print numpy.mean(tiles), numpy.var(tiles)
 
         if args.max_duration is not None:
             max_dof = 2 * args.max_duration * (band * (nc_sum+1))
@@ -474,10 +554,15 @@ while t_idx_max <= t_idx_max_off:
 
             #tlen = tiles.shape[1] - j + 1
             tlen = tiles.shape[1] - 2*j + 1 + 1
+            if tlen <= 0:
+                print >>sys.stderr, " ...not enough samples."
+                continue
+
             dof_tiles = numpy.zeros((tiles.shape[0], tlen))
             #:sum_filter = numpy.ones(j)
             # FIXME: This is the correct filter for 50% overlap
             sum_filter = numpy.array([1,0] * (j-1) + [1])
+            #sum_filter = numpy.array([1,0] * int(math.log(j, 2)-1) + [1])
             for f in range(tiles.shape[0]):
                 # Sum and drop correlate tiles
                 # FIXME: don't drop correlated tiles
@@ -510,8 +595,7 @@ while t_idx_max <= t_idx_max_off:
             window_offset_epoch = fs_data.epoch + dt_stride * window_fraction / 2
 
             trigger_list_from_map(dof_tiles, event_list, threshold, window_offset_epoch, lal_filters[0].f0 + band/2, duration, current_band, df, dt, None)
-            lal_psd = fd_psd.lal()
-            for event in event_list:
+            for event in event_list[::-1]:
                 if event.amplitude != None:
                     continue
                 etime_min_idx = float(event.get_start()) - float(fs_data.epoch)
@@ -521,8 +605,15 @@ while t_idx_max <= t_idx_max_off:
                 # (band / 2) to account for sin^2 wings from finest filters
                 flow_idx = int((event.central_freq - event.bandwidth / 2 - (band / 2) - flow) / band)
                 fhigh_idx = int((event.central_freq + event.bandwidth / 2 + (band / 2) - flow) / band)
-                z_j_b = tf_map[flow_idx:fhigh_idx,etime_min_idx:etime_max_idx]
-                #measure_hrss(z_j_b, lal_filters, spec_corr, lal_psd, ts_data.delta_t, event.chisq_dof)
+                # TODO: Check that the undersampling rate is always commensurate
+                # with the indexing: that is to say that
+                # mod(etime_min_idx, us_rate) == 0 always
+                z_j_b = tf_map[flow_idx:fhigh_idx,etime_min_idx:etime_max_idx:us_rate]
+                # FIXME: Deal with negative hrss^2 -- e.g. remove the event
+                try:
+                    event.amplitude = measure_hrss(z_j_b, unwhite_filter_ip[flow_idx:fhigh_idx], unwhite_ss_ip[flow_idx:fhigh_idx-1], white_ss_ip[flow_idx:fhigh_idx-1], fd_psd.delta_f, tmp_ts_data.delta_t, len(lal_filters[0].data.data), event.chisq_dof)
+                except ValueError:
+                    event.amplitude = 0
 
             print "Total number of events: %d" % len(event_list)
 
@@ -537,6 +628,9 @@ xmldoc.appendChild(ligolw.LIGO_LW())
 
 ifo = args.channel_name.split(":")[0]
 proc_row = register_to_xmldoc(xmldoc, __program__, args.__dict__, ifos=[ifo],version=glue.git_version.id, cvs_repository=glue.git_version.branch, cvs_entry_time=glue.git_version.date)
+
+# Figure out the data we actually analyzed
+outseg = determine_output_segment(inseg, dt_stride, args.sample_rate, window_fraction)
 
 ss = append_search_summary(xmldoc, proc_row, ifos=("H1",), inseg=inseg, outseg=outseg)
 
