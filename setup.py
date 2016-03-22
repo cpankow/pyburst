@@ -91,7 +91,7 @@ class install(_install):
                      "creating %s" % filename)
 
         env_file = open(filename, 'w')
-        print >> env_file, "# Source this file to access PyCBC"
+        print >> env_file, "# Source this file to access PyBurst"
         print >> env_file, "PATH=" + self.install_scripts + ":$PATH"
         print >> env_file, "PYTHONPATH=" + self.install_libbase + ":$PYTHONPATH"
         print >> env_file, "export PYTHONPATH"
@@ -237,7 +237,7 @@ setup (
                  'build' : build},
     requires = requires,
     scripts  = [
-               #'bin/pyburst_excesspower',
+               'bin/pyburst_excesspower',
                'bin/pyburst_binj',
                'bin/pyburst_inj_snr',
                ],
